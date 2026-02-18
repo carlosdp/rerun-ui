@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.12,<2"]
+build-backend = "maturin"
+
+[project]
+name = "rerun-ui"
+version = "0.1.0"
+description = "Custom Rerun viewer UI with robust Python callbacks"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "rerun-sdk>=0.29.2,<0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[tool.maturin]
+bindings = "pyo3"
+module-name = "rerun_ui._rerun_ui"
+python-source = "."
