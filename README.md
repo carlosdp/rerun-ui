@@ -98,3 +98,23 @@ Optional runtime limit:
 ```bash
 python examples/smoke_test.py --duration-s 30
 ```
+
+## Wheel publishing branch
+
+GitHub Actions workflow:
+
+- `/Users/carlosdp/code/rerun-ui/.github/workflows/build-wheels.yml`
+
+What it does:
+
+- builds abi3 wheels for Linux (`x86_64`) and macOS (`x86_64`, `arm64`)
+- publishes only wheel/index artifacts to the `wheels` branch (orphan history)
+- writes a simple index under `simple/rerun-ui/index.html`
+
+Consumer usage (automatic platform wheel selection):
+
+```bash
+pip install \
+  --find-links https://raw.githubusercontent.com/<owner>/<repo>/wheels/simple/rerun-ui/index.html \
+  rerun-ui
+```

@@ -1,0 +1,142 @@
+name: Build and Publish Wheels
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  PACKAGE_NAME: rerun-ui
+  WHEELS_BRANCH: wheels
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }} / ${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2014"
+          - os: macos-13
+            target: x86_64-apple-darwin
+            manylinux: "off"
+          - os: macos-14
+            target: aarch64-apple-darwin
+            manylinux: "off"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build wheels (Linux manylinux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --out dist
+          sccache: true
+
+      - name: Build wheels (macOS)
+        if: matrix.os != 'ubuntu-latest'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          sccache: true
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  publish:
+    name: Publish wheel branch
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Prepare wheel index content
+        run: |
+          set -euxo pipefail
+          mkdir -p publish/wheels publish/simple/rerun-ui publish/simple/rerun_ui
+          cp dist/*.whl publish/wheels/
+
+          python - <<'PY'
+          from pathlib import Path
+          import datetime
+
+          root = Path("publish")
+          wheels = sorted((root / "wheels").glob("*.whl"))
+          if not wheels:
+              raise SystemExit("No wheels found to publish")
+
+          links = "\n".join(
+              f'<a href="../../wheels/{w.name}">{w.name}</a><br/>'
+              for w in wheels
+          )
+          for pkg in ("rerun-ui", "rerun_ui"):
+              pkg_dir = root / "simple" / pkg
+              pkg_dir.mkdir(parents=True, exist_ok=True)
+              (pkg_dir / "index.html").write_text(
+                  "<!doctype html><html><body>\n"
+                  f"{links}\n"
+                  "</body></html>\n",
+                  encoding="utf-8",
+              )
+
+          (root / "simple" / "index.html").write_text(
+              "<!doctype html><html><body>\n"
+              '<a href="rerun-ui/">rerun-ui</a><br/>\n'
+              '<a href="rerun_ui/">rerun_ui</a>\n'
+              "</body></html>\n",
+              encoding="utf-8",
+          )
+
+          (root / "index.html").write_text(
+              "<!doctype html><html><body>\n"
+              '<a href="simple/">simple/</a><br/>\n'
+              '<a href="wheels/">wheels/</a><br/>\n'
+              f"Generated: {datetime.datetime.utcnow().isoformat()}Z\n"
+              "</body></html>\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Publish to wheel branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: ${{ env.WHEELS_BRANCH }}
+          publish_dir: publish
+          force_orphan: true
+          commit_message: "Publish wheels from ${{ github.sha }}"
