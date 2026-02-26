@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -7,6 +8,33 @@ class ViewerStatus(str, Enum):
     CUSTOM_CONNECTED = "custom_connected"
     PLAIN_CONNECTED = "plain_connected"
     DISCONNECTED = "disconnected"
+
+
+class PointerEventType(str, Enum):
+    PRESS = "press"
+    RELEASE = "release"
+    CLICK = "click"
+    DRAG = "drag"
+
+
+class PointerButton(str, Enum):
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+    MIDDLE = "middle"
+
+
+@dataclass(frozen=True)
+class Pointer3DEvent:
+    event_type: PointerEventType
+    button: PointerButton
+    view_id: str
+    space_origin: str
+    pointer_ui: tuple[float, float]
+    pointer_view: tuple[float, float]
+    ray_origin: tuple[float, float, float]
+    ray_direction: tuple[float, float, float]
+    projected_position: tuple[float, float, float] | None
+    drag_delta: tuple[float, float] | None
 
 
 class Key(str, Enum):

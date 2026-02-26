@@ -5,7 +5,7 @@ import unittest
 from unittest import mock
 
 from rerun_ui._manager import _ViewerManager
-from rerun_ui._types import ViewerStatus
+from rerun_ui._types import PointerEventType, ViewerStatus
 
 
 class ViewerManagerTest(unittest.TestCase):
@@ -61,6 +61,61 @@ class ViewerManagerTest(unittest.TestCase):
         manager._dispatch_event({"type": "button_clicked", "button_id": "good"})
 
         self.assertEqual(called, ["good"])
+
+    def test_pointer_click_callback_dispatch(self) -> None:
+        manager = _ViewerManager()
+        received: list[tuple[float, float]] = []
+
+        manager.handle_3d_view_click(lambda event: received.append(event.pointer_view))
+        manager._dispatch_event(
+            {
+                "type": "pointer_3d",
+                "event_kind": "click",
+                "button": "primary",
+                "view_id": "ViewId(1234)",
+                "space_origin": "/world",
+                "pointer_ui": [100.0, 120.0],
+                "pointer_view": [10.0, 20.0],
+                "ray_origin": [1.0, 2.0, 3.0],
+                "ray_direction": [0.0, 0.0, -1.0],
+                "projected_position": [1.5, 2.5, 3.5],
+                "drag_delta": None,
+            }
+        )
+
+        self.assertEqual(received, [(10.0, 20.0)])
+
+    def test_pointer_event_is_ignored_when_payload_invalid(self) -> None:
+        manager = _ViewerManager()
+        called: list[str] = []
+
+        manager.handle_3d_view_click(lambda _event: called.append("ok"))
+        manager._dispatch_event(
+            {
+                "type": "pointer_3d",
+                "event_kind": "click",
+                "button": "primary",
+                "view_id": "ViewId(1234)",
+                "space_origin": "/world",
+                "pointer_ui": [100.0],
+                "pointer_view": [10.0, 20.0],
+                "ray_origin": [1.0, 2.0, 3.0],
+                "ray_direction": [0.0, 0.0, -1.0],
+                "projected_position": [1.5, 2.5, 3.5],
+                "drag_delta": None,
+            }
+        )
+
+        self.assertEqual(called, [])
+
+    def test_sync_pointer_config_enabled(self) -> None:
+        manager = _ViewerManager()
+        manager._pointer_callbacks[PointerEventType.CLICK].append(lambda _event: None)
+
+        with mock.patch.object(manager, "_send_command_locked") as send:
+            manager._sync_pointer_locked()
+
+        send.assert_called_once_with({"type": "set_pointer_config", "enabled": True})
 
     def test_strict_version_mismatch_raises(self) -> None:
         manager = _ViewerManager()

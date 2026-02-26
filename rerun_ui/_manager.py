@@ -13,7 +13,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from ._types import Key, ViewerStatus
+from ._types import Key, Pointer3DEvent, PointerButton, PointerEventType, ViewerStatus
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,6 +51,78 @@ class _ButtonSpec:
     label: str
 
 
+def _parse_float_tuple(raw: Any, size: int) -> tuple[float, ...] | None:
+    if not isinstance(raw, list) or len(raw) != size:
+        return None
+
+    values: list[float] = []
+    for item in raw:
+        if not isinstance(item, (int, float)):
+            return None
+        values.append(float(item))
+
+    return tuple(values)
+
+
+def _parse_pointer_event(raw_event: dict[str, Any]) -> Pointer3DEvent | None:
+    event_kind_raw = raw_event.get("event_kind")
+    button_raw = raw_event.get("button")
+    view_id = raw_event.get("view_id")
+    space_origin = raw_event.get("space_origin")
+
+    if not isinstance(event_kind_raw, str) or not isinstance(button_raw, str):
+        return None
+    if not isinstance(view_id, str) or not isinstance(space_origin, str):
+        return None
+
+    try:
+        event_type = PointerEventType(event_kind_raw)
+        button = PointerButton(button_raw)
+    except ValueError:
+        return None
+
+    pointer_ui = _parse_float_tuple(raw_event.get("pointer_ui"), 2)
+    pointer_view = _parse_float_tuple(raw_event.get("pointer_view"), 2)
+    ray_origin = _parse_float_tuple(raw_event.get("ray_origin"), 3)
+    ray_direction = _parse_float_tuple(raw_event.get("ray_direction"), 3)
+
+    if pointer_ui is None or pointer_view is None or ray_origin is None or ray_direction is None:
+        return None
+
+    raw_projected = raw_event.get("projected_position")
+    if raw_projected is None:
+        projected_position = None
+    else:
+        projected_position = _parse_float_tuple(raw_projected, 3)
+        if projected_position is None:
+            return None
+
+    raw_drag_delta = raw_event.get("drag_delta")
+    if raw_drag_delta is None:
+        drag_delta = None
+    else:
+        drag_delta = _parse_float_tuple(raw_drag_delta, 2)
+        if drag_delta is None:
+            return None
+
+    return Pointer3DEvent(
+        event_type=event_type,
+        button=button,
+        view_id=view_id,
+        space_origin=space_origin,
+        pointer_ui=(pointer_ui[0], pointer_ui[1]),
+        pointer_view=(pointer_view[0], pointer_view[1]),
+        ray_origin=(ray_origin[0], ray_origin[1], ray_origin[2]),
+        ray_direction=(ray_direction[0], ray_direction[1], ray_direction[2]),
+        projected_position=(
+            None
+            if projected_position is None
+            else (projected_position[0], projected_position[1], projected_position[2])
+        ),
+        drag_delta=None if drag_delta is None else (drag_delta[0], drag_delta[1]),
+    )
+
+
 class _ViewerManager:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -81,6 +153,12 @@ class _ViewerManager:
         self._button_callbacks: dict[str, Callable[[], None]] = {}
         self._keyboard_callback: Callable[[list[Key]], None] | None = None
         self._keyboard_poll_hz: float = 30.0
+        self._pointer_callbacks: dict[PointerEventType, list[Callable[[Pointer3DEvent], None]]] = {
+            PointerEventType.CLICK: [],
+            PointerEventType.PRESS: [],
+            PointerEventType.RELEASE: [],
+            PointerEventType.DRAG: [],
+        }
 
         self._sdk_target: str | None = None
         self._version_checked = False
@@ -146,6 +224,35 @@ class _ViewerManager:
         with self._lock:
             if self._status == ViewerStatus.CUSTOM_CONNECTED:
                 self._sync_keyboard_locked()
+
+    def handle_3d_view_click(self, callback: Callable[[Pointer3DEvent], None]) -> None:
+        self._register_pointer_listener(PointerEventType.CLICK, callback)
+
+    def handle_3d_view_press(self, callback: Callable[[Pointer3DEvent], None]) -> None:
+        self._register_pointer_listener(PointerEventType.PRESS, callback)
+
+    def handle_3d_view_release(self, callback: Callable[[Pointer3DEvent], None]) -> None:
+        self._register_pointer_listener(PointerEventType.RELEASE, callback)
+
+    def handle_3d_view_drag(self, callback: Callable[[Pointer3DEvent], None]) -> None:
+        self._register_pointer_listener(PointerEventType.DRAG, callback)
+
+    def _register_pointer_listener(
+        self,
+        event_type: PointerEventType,
+        callback: Callable[[Pointer3DEvent], None],
+    ) -> None:
+        if not callable(callback):
+            raise TypeError("callback must be callable")
+
+        with self._lock:
+            self._pointer_callbacks[event_type].append(callback)
+
+        self._recover_if_needed()
+
+        with self._lock:
+            if self._status == ViewerStatus.CUSTOM_CONNECTED:
+                self._sync_pointer_locked()
 
     def is_custom_ui_available(self) -> bool:
         self._recover_if_needed()
@@ -353,6 +460,20 @@ class _ViewerManager:
                 except Exception:
                     LOGGER.exception("rerun_ui keyboard callback failed")
 
+        elif event_type == "pointer_3d":
+            pointer_event = _parse_pointer_event(event)
+            if pointer_event is None:
+                return
+
+            with self._lock:
+                callbacks = list(self._pointer_callbacks[pointer_event.event_type])
+
+            for callback in callbacks:
+                try:
+                    callback(pointer_event)
+                except Exception:
+                    LOGGER.exception("rerun_ui pointer callback failed")
+
     def _handle_disconnected(self, connection_id: int) -> None:
         with self._lock:
             if connection_id != self._connection_id:
@@ -366,6 +487,7 @@ class _ViewerManager:
     def _sync_state_locked(self) -> None:
         self._sync_buttons_locked()
         self._sync_keyboard_locked()
+        self._sync_pointer_locked()
 
     def _sync_buttons_locked(self) -> None:
         self._send_command_locked(
@@ -381,6 +503,14 @@ class _ViewerManager:
                 "type": "set_keyboard_config",
                 "enabled": self._keyboard_callback is not None,
                 "poll_hz": float(self._keyboard_poll_hz),
+            }
+        )
+
+    def _sync_pointer_locked(self) -> None:
+        self._send_command_locked(
+            {
+                "type": "set_pointer_config",
+                "enabled": any(self._pointer_callbacks.values()),
             }
         )
 
@@ -531,6 +661,22 @@ def add_button(label: str, callback: Callable[[], None]) -> str:
 
 def handle_keyboard_input(callback: Callable[[list[Key]], None], poll_hz: float = 30.0) -> None:
     _MANAGER.handle_keyboard_input(callback=callback, poll_hz=poll_hz)
+
+
+def handle_3d_view_click(callback: Callable[[Pointer3DEvent], None]) -> None:
+    _MANAGER.handle_3d_view_click(callback)
+
+
+def handle_3d_view_press(callback: Callable[[Pointer3DEvent], None]) -> None:
+    _MANAGER.handle_3d_view_press(callback)
+
+
+def handle_3d_view_release(callback: Callable[[Pointer3DEvent], None]) -> None:
+    _MANAGER.handle_3d_view_release(callback)
+
+
+def handle_3d_view_drag(callback: Callable[[Pointer3DEvent], None]) -> None:
+    _MANAGER.handle_3d_view_drag(callback)
 
 
 def is_custom_ui_available() -> bool:

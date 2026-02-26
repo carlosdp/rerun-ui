@@ -33,6 +33,34 @@ impl Default for KeyboardConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct PointerConfig {
+    pub enabled: bool,
+}
+
+impl Default for PointerConfig {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PointerEventKind {
+    Press,
+    Release,
+    Click,
+    Drag,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PointerButton {
+    Primary,
+    Secondary,
+    Middle,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ViewerCommand {
@@ -46,6 +74,9 @@ enum ViewerCommand {
     SetKeyboardConfig {
         enabled: bool,
         poll_hz: f32,
+    },
+    SetPointerConfig {
+        enabled: bool,
     },
     Ping {
         nonce: Option<String>,
@@ -65,6 +96,18 @@ pub enum ViewerEvent {
     KeyboardState {
         pressed_keys: Vec<String>,
     },
+    Pointer3d {
+        event_kind: PointerEventKind,
+        button: PointerButton,
+        view_id: String,
+        space_origin: String,
+        pointer_ui: [f32; 2],
+        pointer_view: [f32; 2],
+        ray_origin: [f32; 3],
+        ray_direction: [f32; 3],
+        projected_position: Option<[f32; 3]>,
+        drag_delta: Option<[f32; 2]>,
+    },
     Pong {
         nonce: Option<String>,
     },
@@ -73,6 +116,7 @@ pub enum ViewerEvent {
 pub struct ControlShared {
     buttons: RwLock<Vec<ButtonConfig>>,
     keyboard_config: RwLock<KeyboardConfig>,
+    pointer_config: RwLock<PointerConfig>,
     event_tx: mpsc::Sender<ViewerEvent>,
     connected: AtomicBool,
 }
@@ -82,6 +126,7 @@ impl ControlShared {
         Self {
             buttons: RwLock::new(Vec::new()),
             keyboard_config: RwLock::new(KeyboardConfig::default()),
+            pointer_config: RwLock::new(PointerConfig::default()),
             event_tx,
             connected: AtomicBool::new(false),
         }
@@ -109,6 +154,19 @@ impl ControlShared {
 
     pub fn keyboard_config(&self) -> KeyboardConfig {
         self.keyboard_config
+            .read()
+            .map(|config| config.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn set_pointer_config(&self, enabled: bool) {
+        if let Ok(mut config) = self.pointer_config.write() {
+            config.enabled = enabled;
+        }
+    }
+
+    pub fn pointer_config(&self) -> PointerConfig {
+        self.pointer_config
             .read()
             .map(|config| config.clone())
             .unwrap_or_default()
@@ -278,6 +336,9 @@ fn handle_command(
         }
         ViewerCommand::SetKeyboardConfig { enabled, poll_hz } => {
             shared.set_keyboard_config(enabled, poll_hz);
+        }
+        ViewerCommand::SetPointerConfig { enabled } => {
+            shared.set_pointer_config(enabled);
         }
         ViewerCommand::Ping { nonce } => {
             write_event(writer, &ViewerEvent::Pong { nonce })?;

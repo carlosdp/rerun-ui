@@ -1,11 +1,15 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
+use re_view_spatial::{
+    Pointer3DEvent as SpatialPointer3DEvent, PointerButton as SpatialPointerButton,
+    PointerEventType as SpatialPointerEventType,
+};
 use rerun::external::{
     eframe, egui, re_crash_handler, re_grpc_server, re_log, re_memory, re_viewer, tokio,
 };
 
-use crate::ipc::{self, ControlShared, ViewerEvent};
+use crate::ipc::{self, ControlShared, PointerButton, PointerEventKind, ViewerEvent};
 
 #[global_allocator]
 static GLOBAL: re_memory::AccountingAllocator<mimalloc::MiMalloc> =
@@ -78,6 +82,8 @@ struct CustomViewerApp {
 
 impl CustomViewerApp {
     fn new(rerun_app: re_viewer::App, control: std::sync::Arc<ControlShared>) -> Self {
+        register_pointer_event_bridge(&control);
+
         Self {
             rerun_app,
             control,
@@ -153,6 +159,12 @@ impl eframe::App for CustomViewerApp {
     }
 }
 
+impl Drop for CustomViewerApp {
+    fn drop(&mut self) {
+        re_view_spatial::set_pointer_event_callback(None);
+    }
+}
+
 #[derive(Debug)]
 struct KeyboardState {
     last_keys: Vec<String>,
@@ -197,4 +209,52 @@ fn normalize_key_name(raw: String) -> String {
     }
 
     out
+}
+
+fn register_pointer_event_bridge(control: &std::sync::Arc<ControlShared>) {
+    let control = std::sync::Arc::clone(control);
+
+    re_view_spatial::set_pointer_event_callback(Some(std::sync::Arc::new(
+        move |event: SpatialPointer3DEvent| {
+            if !control.pointer_config().enabled {
+                return;
+            }
+
+            control.emit_event(ViewerEvent::Pointer3d {
+                event_kind: map_pointer_event_kind(event.event_type),
+                button: map_pointer_button(event.button),
+                view_id: event.view_id,
+                space_origin: event.space_origin,
+                pointer_ui: [event.pointer_in_ui.x, event.pointer_in_ui.y],
+                pointer_view: [event.pointer_in_view.x, event.pointer_in_view.y],
+                ray_origin: [event.ray_origin.x, event.ray_origin.y, event.ray_origin.z],
+                ray_direction: [
+                    event.ray_direction.x,
+                    event.ray_direction.y,
+                    event.ray_direction.z,
+                ],
+                projected_position: event
+                    .projected_position
+                    .map(|pos| [pos.x, pos.y, pos.z]),
+                drag_delta: event.drag_delta.map(|delta| [delta.x, delta.y]),
+            });
+        },
+    )));
+}
+
+fn map_pointer_event_kind(kind: SpatialPointerEventType) -> PointerEventKind {
+    match kind {
+        SpatialPointerEventType::Press => PointerEventKind::Press,
+        SpatialPointerEventType::Release => PointerEventKind::Release,
+        SpatialPointerEventType::Click => PointerEventKind::Click,
+        SpatialPointerEventType::Drag => PointerEventKind::Drag,
+    }
+}
+
+fn map_pointer_button(button: SpatialPointerButton) -> PointerButton {
+    match button {
+        SpatialPointerButton::Primary => PointerButton::Primary,
+        SpatialPointerButton::Secondary => PointerButton::Secondary,
+        SpatialPointerButton::Middle => PointerButton::Middle,
+    }
 }
