@@ -112,7 +112,7 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
-        rerun_ui.disconnect()
+        rerun_ui.shutdown_viewer()
 
     print("Smoke test finished.")
     return 0

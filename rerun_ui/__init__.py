@@ -9,6 +9,7 @@ from ._manager import (
     handle_3d_view_release,
     handle_keyboard_input,
     is_custom_ui_available,
+    shutdown_viewer,
     spawn_viewer,
 )
 from ._types import Key, Pointer3DEvent, PointerButton, PointerEventType, ViewerStatus
@@ -28,4 +29,5 @@ __all__ = [
     "handle_3d_view_drag",
     "is_custom_ui_available",
     "disconnect",
+    "shutdown_viewer",
 ]

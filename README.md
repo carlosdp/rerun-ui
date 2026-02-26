@@ -68,6 +68,7 @@ rerun_ui.handle_3d_view_click(on_3d_pointer)
 - `handle_3d_view_drag(callback) -> None`
 - `is_custom_ui_available() -> bool`
 - `disconnect() -> None`
+- `shutdown_viewer() -> None`
 
 ### 3D pointer events
 
@@ -92,6 +93,8 @@ rerun_ui.handle_3d_view_click(on_3d_pointer)
 - If a custom `rerun_ui` viewer is already running on `control_port`, the package attaches to it.
 - If only a plain Rerun viewer is running on `grpc_port`, data connection is reused and custom controls remain inactive.
 - If no viewer is running, `rerun_ui` spawns its own subprocess (`python -m rerun_ui._viewer_host`).
+- `disconnect()` only detaches the Python client; it does not close the viewer process.
+- `shutdown_viewer()` closes the viewer process if it was spawned by this Python process.
 - If the custom viewer crashes, the next API call triggers reconnect/spawn logic (on-demand recovery).
 
 ## Protocol

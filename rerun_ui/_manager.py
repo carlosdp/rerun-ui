@@ -272,6 +272,12 @@ class _ViewerManager:
             self._status = ViewerStatus.DISCONNECTED
             self._connection_id += 1
 
+            self._sdk_target = None
+
+    def shutdown_viewer(self) -> None:
+        self.disconnect()
+
+        with self._lock:
             if self._owns_process and self._proc is not None:
                 if self._proc.poll() is None:
                     self._proc.terminate()
@@ -281,8 +287,6 @@ class _ViewerManager:
                         self._proc.kill()
                 self._proc = None
                 self._owns_process = False
-
-            self._sdk_target = None
 
     def _recover_if_needed(self) -> None:
         with self._lock:
@@ -540,7 +544,7 @@ class _ViewerManager:
                 "--control-port",
                 str(self._control_port),
             ]
-            self._proc = subprocess.Popen(args)
+            self._proc = subprocess.Popen(args, start_new_session=True)
             self._owns_process = True
 
     def _connect_sdk(self, force: bool = False) -> None:
@@ -685,3 +689,7 @@ def is_custom_ui_available() -> bool:
 
 def disconnect() -> None:
     _MANAGER.disconnect()
+
+
+def shutdown_viewer() -> None:
+    _MANAGER.shutdown_viewer()

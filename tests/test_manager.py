@@ -38,6 +38,16 @@ class ViewerManagerTest(unittest.TestCase):
         self.assertEqual(manager._status, ViewerStatus.PLAIN_CONNECTED)
         spawn.assert_not_called()
 
+    def test_recover_attaches_existing_custom_viewer_without_spawning(self) -> None:
+        manager = _ViewerManager()
+
+        with mock.patch.object(manager, "_try_attach_custom", return_value=True), mock.patch.object(
+            manager, "_spawn_subprocess_if_needed"
+        ) as spawn:
+            manager._recover_or_spawn(launch_timeout_s=0.5)
+
+        spawn.assert_not_called()
+
     def test_button_callback_dispatch(self) -> None:
         manager = _ViewerManager()
         clicked: list[str] = []
@@ -116,6 +126,36 @@ class ViewerManagerTest(unittest.TestCase):
             manager._sync_pointer_locked()
 
         send.assert_called_once_with({"type": "set_pointer_config", "enabled": True})
+
+    def test_disconnect_does_not_terminate_owned_viewer(self) -> None:
+        manager = _ViewerManager()
+        proc = mock.MagicMock()
+        proc.poll.return_value = None
+        manager._proc = proc
+        manager._owns_process = True
+        manager._status = ViewerStatus.CUSTOM_CONNECTED
+
+        with mock.patch.dict("sys.modules", {"rerun": mock.MagicMock()}):
+            manager.disconnect()
+
+        proc.terminate.assert_not_called()
+        self.assertIs(manager._proc, proc)
+        self.assertTrue(manager._owns_process)
+        self.assertEqual(manager._status, ViewerStatus.DISCONNECTED)
+
+    def test_shutdown_viewer_terminates_owned_viewer(self) -> None:
+        manager = _ViewerManager()
+        proc = mock.MagicMock()
+        proc.poll.return_value = None
+        manager._proc = proc
+        manager._owns_process = True
+
+        with mock.patch.dict("sys.modules", {"rerun": mock.MagicMock()}):
+            manager.shutdown_viewer()
+
+        proc.terminate.assert_called_once()
+        self.assertIsNone(manager._proc)
+        self.assertFalse(manager._owns_process)
 
     def test_strict_version_mismatch_raises(self) -> None:
         manager = _ViewerManager()
