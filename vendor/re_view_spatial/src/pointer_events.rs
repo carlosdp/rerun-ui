@@ -156,6 +156,15 @@ pub fn emit_pointer_events(
         return;
     }
 
+    // Pointer callbacks are a Cmd-modified interaction mode in 3D views.
+    // Never emit pointer events unless Cmd is currently held.
+    if !response
+        .ctx
+        .input(|input| input.modifiers.command || input.modifiers.mac_cmd)
+    {
+        return;
+    }
+
     let has_callback = callback_cell()
         .read()
         .map(|callback_slot| callback_slot.is_some())
