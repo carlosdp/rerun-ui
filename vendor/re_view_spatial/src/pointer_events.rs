@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
 use re_log_types::EntityPath;
@@ -41,10 +42,42 @@ fn callback_cell() -> &'static RwLock<Option<PointerEventCallback>> {
     POINTER_EVENT_CALLBACK.get_or_init(|| RwLock::new(None))
 }
 
+fn listeners_enabled_cell() -> &'static AtomicBool {
+    static POINTER_LISTENERS_ENABLED: OnceLock<AtomicBool> = OnceLock::new();
+    POINTER_LISTENERS_ENABLED.get_or_init(|| AtomicBool::new(false))
+}
+
 pub fn set_pointer_event_callback(callback: Option<PointerEventCallback>) {
     if let Ok(mut callback_slot) = callback_cell().write() {
         *callback_slot = callback;
     }
+}
+
+pub fn set_pointer_listeners_enabled(enabled: bool) {
+    listeners_enabled_cell().store(enabled, Ordering::SeqCst);
+}
+
+pub fn pointer_listeners_enabled() -> bool {
+    listeners_enabled_cell().load(Ordering::SeqCst)
+}
+
+pub fn should_capture_interactions(response: &egui::Response) -> bool {
+    if !pointer_listeners_enabled() {
+        return false;
+    }
+
+    if !response
+        .ctx
+        .input(|input| input.modifiers.command || input.modifiers.mac_cmd)
+    {
+        return false;
+    }
+
+    response.contains_pointer()
+        || response.hovered()
+        || response.is_pointer_button_down_on()
+        || response.dragged()
+        || response.drag_stopped()
 }
 
 fn dispatch(event: Pointer3DEvent) {
@@ -119,6 +152,10 @@ pub fn emit_pointer_events(
     picking_context: &PickingContext,
     projected_position: Option<glam::Vec3>,
 ) {
+    if !pointer_listeners_enabled() {
+        return;
+    }
+
     let has_callback = callback_cell()
         .read()
         .map(|callback_slot| callback_slot.is_some())

@@ -39,7 +39,7 @@ pub use view_2d::SpatialView2D;
 pub use view_3d::SpatialView3D;
 pub use pointer_events::{
     Pointer3DEvent, PointerButton, PointerEventCallback, PointerEventType,
-    set_pointer_event_callback,
+    set_pointer_event_callback, set_pointer_listeners_enabled, should_capture_interactions,
 };
 
 mod view_kind {

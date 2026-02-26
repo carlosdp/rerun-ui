@@ -83,6 +83,8 @@ rerun_ui.handle_3d_view_click(on_3d_pointer)
   - `projected_position`: world-space hit point when a pick hit exists
 - `view_id`, `space_origin` to identify the source view/space
 - `drag_delta` for drag events (UI-point delta since previous frame)
+- when one or more 3D pointer listeners are registered, holding `Cmd` in a 3D view routes click/drag
+  interactions to these callbacks instead of the viewer camera/selection controls
 
 ## Runtime behavior
 

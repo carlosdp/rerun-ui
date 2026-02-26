@@ -460,7 +460,7 @@ class _ViewerManager:
                 except Exception:
                     LOGGER.exception("rerun_ui keyboard callback failed")
 
-        elif event_type == "pointer_3d":
+        elif event_type in {"pointer_3d", "pointer3d"}:
             pointer_event = _parse_pointer_event(event)
             if pointer_event is None:
                 return

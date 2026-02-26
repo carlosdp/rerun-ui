@@ -1,9 +1,9 @@
 use egui::NumExt as _;
-use re_data_ui::{DataUi as _, item_ui};
+use re_data_ui::{item_ui, DataUi as _};
 use re_log_types::Instance;
 use re_renderer::ViewPickingConfiguration;
+use re_ui::list_item::{list_item_scope, PropertyContent};
 use re_ui::UiExt as _;
-use re_ui::list_item::{PropertyContent, list_item_scope};
 use re_view::AnnotationSceneContext;
 use re_viewer_context::{
     Item, ItemCollection, ItemContext, UiLayout, ViewQuery, ViewSystemExecutionError,
@@ -12,15 +12,15 @@ use re_viewer_context::{
 
 use crate::visualizers::DepthImageProcessResult;
 use crate::{
-    PickableRectSourceData, PickableTexturedRect,
     picking::{PickableUiRect, PickingContext, PickingHitType},
-    picking_ui_pixel::{PickedPixelInfo, textured_rect_hover_ui},
+    picking_ui_pixel::{textured_rect_hover_ui, PickedPixelInfo},
     ui::SpatialViewState,
     view_kind::SpatialViewKind,
     visualizers::{
         CamerasVisualizer, DepthImageVisualizer, EncodedDepthImageVisualizer,
         SpatialViewVisualizerData,
     },
+    PickableRectSourceData, PickableTexturedRect,
 };
 
 #[expect(clippy::too_many_arguments)]
@@ -37,7 +37,9 @@ pub fn picking(
 ) -> Result<(egui::Response, Option<ViewPickingConfiguration>), ViewSystemExecutionError> {
     re_tracing::profile_function!();
 
-    if ui.ctx().dragged_id().is_some() {
+    // Upstream skips picking while dragging arbitrary UI widgets. That clashes with our custom
+    // pointer handling in 3D views where drag input is expected.
+    if spatial_kind == SpatialViewKind::TwoD && ui.ctx().dragged_id().is_some() {
         state.previous_picking_result = None;
         return Ok((response, None));
     }
@@ -229,6 +231,10 @@ pub fn picking(
             picking_context,
             picking_result.space_position(),
         );
+
+        if crate::pointer_events::should_capture_interactions(&response) {
+            return Ok((response, Some(picking_config)));
+        }
     }
 
     ctx.handle_select_hover_drag_interactions(&response, hovered_items, false);

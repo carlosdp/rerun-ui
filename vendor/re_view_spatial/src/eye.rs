@@ -565,30 +565,34 @@ impl EyeController {
         response: &egui::Response,
         drag_threshold: f32,
     ) {
-        // Modify speed based on modifiers:
-        let os = response.ctx.os();
-        response.ctx.input(|input| {
-            if input.modifiers.contains(SPEED_UP_3D_MODIFIER) {
-                self.speed *= 10.0;
+        let capture_pointer = crate::pointer_events::should_capture_interactions(response);
+
+        if !capture_pointer {
+            // Modify speed based on modifiers:
+            let os = response.ctx.os();
+            response.ctx.input(|input| {
+                if input.modifiers.contains(SPEED_UP_3D_MODIFIER) {
+                    self.speed *= 10.0;
+                }
+                if input.modifiers.contains(RuntimeModifiers::slow_down(&os)) {
+                    self.speed *= 0.1;
+                }
+            });
+
+            // Dragging even below the [`drag_threshold`] should be considered interaction.
+            // Otherwise we flicker in and out of "has interacted" too quickly.
+            self.did_interact |= response.drag_delta().length() > 0.0;
+
+            self.handle_drag(response, drag_threshold);
+
+            if response.hovered() {
+                self.handle_zoom(&response.ctx);
             }
-            if input.modifiers.contains(RuntimeModifiers::slow_down(&os)) {
-                self.speed *= 0.1;
-            }
-        });
-
-        // Dragging even below the [`drag_threshold`] should be considered interaction.
-        // Otherwise we flicker in and out of "has interacted" too quickly.
-        self.did_interact |= response.drag_delta().length() > 0.0;
-
-        self.handle_drag(response, drag_threshold);
-
-        if response.hovered() {
-            self.handle_zoom(&response.ctx);
         }
 
         if response.has_focus() {
             self.handle_keyboard_navigation(eye_state, &response.ctx);
-        } else if response.clicked() || self.did_interact {
+        } else if !capture_pointer && (response.clicked() || self.did_interact) {
             response.request_focus();
         }
 

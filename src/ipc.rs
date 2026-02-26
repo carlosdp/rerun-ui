@@ -96,6 +96,7 @@ pub enum ViewerEvent {
     KeyboardState {
         pressed_keys: Vec<String>,
     },
+    #[serde(rename = "pointer_3d")]
     Pointer3d {
         event_kind: PointerEventKind,
         button: PointerButton,

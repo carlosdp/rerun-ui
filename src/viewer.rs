@@ -153,6 +153,7 @@ impl eframe::App for CustomViewerApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        re_view_spatial::set_pointer_listeners_enabled(self.control.pointer_config().enabled);
         self.render_controls(ctx);
         self.emit_keyboard_events(ctx);
         self.rerun_app.update(ctx, frame);
@@ -161,6 +162,7 @@ impl eframe::App for CustomViewerApp {
 
 impl Drop for CustomViewerApp {
     fn drop(&mut self) {
+        re_view_spatial::set_pointer_listeners_enabled(false);
         re_view_spatial::set_pointer_event_callback(None);
     }
 }
@@ -233,9 +235,7 @@ fn register_pointer_event_bridge(control: &std::sync::Arc<ControlShared>) {
                     event.ray_direction.y,
                     event.ray_direction.z,
                 ],
-                projected_position: event
-                    .projected_position
-                    .map(|pos| [pos.x, pos.y, pos.z]),
+                projected_position: event.projected_position.map(|pos| [pos.x, pos.y, pos.z]),
                 drag_delta: event.drag_delta.map(|delta| [delta.x, delta.y]),
             });
         },
