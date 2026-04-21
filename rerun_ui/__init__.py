@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ._face_surface import FacePatchMesh, FaceQuad, FaceSurface, create_face_surface
 from ._manager import (
     add_button,
     disconnect,
@@ -12,6 +13,7 @@ from ._manager import (
     shutdown_viewer,
     spawn_viewer,
 )
+from ._rive_face import AnimatedFaceHandle, RiveFrameRenderer, attach_rive_face
 from ._types import Key, Pointer3DEvent, PointerButton, PointerEventType, ViewerStatus
 
 __all__ = [
@@ -20,6 +22,13 @@ __all__ = [
     "PointerButton",
     "PointerEventType",
     "ViewerStatus",
+    "FaceQuad",
+    "FacePatchMesh",
+    "FaceSurface",
+    "AnimatedFaceHandle",
+    "RiveFrameRenderer",
+    "create_face_surface",
+    "attach_rive_face",
     "spawn_viewer",
     "add_button",
     "handle_keyboard_input",

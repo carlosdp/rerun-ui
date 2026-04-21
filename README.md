@@ -5,6 +5,7 @@
 The package:
 - runs the viewer in a separate process,
 - adds custom controls (buttons + keyboard input),
+- logs animated robot face surfaces into the existing 3D scene,
 - reconnects on demand after crashes,
 - reuses any existing viewer process already bound to the configured ports.
 
@@ -69,6 +70,84 @@ rerun_ui.handle_3d_view_click(on_3d_pointer)
 - `is_custom_ui_available() -> bool`
 - `disconnect() -> None`
 - `shutdown_viewer() -> None`
+
+### Animated face surface API
+
+The face-surface API is Python-first and logs a dedicated face patch entity into the existing
+Rerun 3D scene. It does **not** require Rust viewer changes.
+
+Public types and helpers:
+
+- `FaceQuad`
+- `FacePatchMesh`
+- `FaceSurface`
+- `AnimatedFaceHandle`
+- `RiveFrameRenderer`
+- `create_face_surface(target, recording=None) -> FaceSurface`
+- `attach_rive_face(target, renderer, recording=None) -> AnimatedFaceHandle`
+
+Use `FaceQuad` when a flat face panel is enough. Use `FacePatchMesh` when the face surface should
+follow custom or curved geometry with explicit UVs.
+
+`FaceSurface` logs static mesh and transform data once, then updates the same entity path with fresh
+RGBA texture payloads over time.
+
+#### Example: animated face with a simple renderer backend
+
+```python
+from __future__ import annotations
+
+import rerun_ui
+
+
+class SolidColorFace:
+    def __init__(self) -> None:
+        self._smiling = False
+
+    def set_bool(self, input_name: str, value: bool) -> None:
+        if input_name == "smile":
+            self._smiling = value
+
+    def set_number(self, input_name: str, value: float) -> None:
+        pass
+
+    def fire_trigger(self, input_name: str) -> None:
+        if input_name == "blink":
+            self._smiling = not self._smiling
+
+    def advance(self, dt_s: float) -> None:
+        pass
+
+    def render_rgba(self) -> tuple[bytes, int, int]:
+        rgba = [0, 255, 0, 255] if self._smiling else [255, 255, 255, 255]
+        return (bytes(rgba * 4), 2, 2)
+
+    def close(self) -> None:
+        pass
+
+
+rerun_ui.spawn_viewer(connect_sdk=True)
+
+target = rerun_ui.FaceQuad(
+    entity_path="/robot/head/face",
+    parent_entity="/robot/head",
+    center_xyz=(0.0, 0.0, 0.0),
+    u_axis_xyz=(1.0, 0.0, 0.0),
+    v_axis_xyz=(0.0, 1.0, 0.0),
+    size_m=(0.2, 0.1),
+)
+
+handle = rerun_ui.attach_rive_face(target, renderer=SolidColorFace())
+handle.set_bool("smile", True)
+handle.advance(1.0 / 30.0, sim_time_s=0.0)
+handle.close()
+```
+
+#### Rive backend status
+
+This package currently ships the public `RiveFrameRenderer` protocol and a tested animated face
+pipeline, but **does not** ship a built-in native Rive renderer backend. The protocol is the seam
+for a future concrete backend once packaging and tooling are settled.
 
 ### 3D pointer events
 
