@@ -5,6 +5,7 @@
 The package:
 - runs the viewer in a separate process,
 - adds custom controls (buttons + keyboard input),
+- logs animated robot face surfaces into the existing 3D scene,
 - reconnects on demand after crashes,
 - reuses any existing viewer process already bound to the configured ports.
 
@@ -14,6 +15,13 @@ This project is a mixed PyO3 + Python package built with `maturin`.
 
 ```bash
 maturin develop
+```
+
+To use the built-in Rive renderer backend from a source checkout, also bootstrap the bundled
+Node helper runtime once:
+
+```bash
+npm install --prefix rerun_ui/_rive_node
 ```
 
 For wheels:
@@ -69,6 +77,127 @@ rerun_ui.handle_3d_view_click(on_3d_pointer)
 - `is_custom_ui_available() -> bool`
 - `disconnect() -> None`
 - `shutdown_viewer() -> None`
+
+### Animated face surface API
+
+The face-surface API is Python-first and logs a dedicated face patch entity into the existing
+Rerun 3D scene. It does **not** require Rust viewer changes.
+
+Public types and helpers:
+
+- `FaceQuad`
+- `FacePatchMesh`
+- `FaceSurface`
+- `AnimatedFaceHandle`
+- `RiveFrameRenderer`
+- `create_face_surface(target, recording=None) -> FaceSurface`
+- `attach_rive_face(target, renderer, recording=None) -> AnimatedFaceHandle`
+- `create_rive_renderer(riv_path, artboard, state_machine, texture_size=(256, 256)) -> RiveFrameRenderer`
+
+Use `FaceQuad` when a flat face panel is enough. Use `FacePatchMesh` when the face surface should
+follow custom or curved geometry with explicit UVs.
+
+`FaceSurface` logs static mesh and transform data once, then updates the same entity path with fresh
+RGBA texture payloads over time.
+
+#### Example: animated face with a simple renderer backend
+
+```python
+from __future__ import annotations
+
+import rerun_ui
+
+
+class SolidColorFace:
+    def __init__(self) -> None:
+        self._smiling = False
+
+    def set_bool(self, input_name: str, value: bool) -> None:
+        if input_name == "smile":
+            self._smiling = value
+
+    def set_number(self, input_name: str, value: float) -> None:
+        pass
+
+    def fire_trigger(self, input_name: str) -> None:
+        if input_name == "blink":
+            self._smiling = not self._smiling
+
+    def advance(self, dt_s: float) -> None:
+        pass
+
+    def render_rgba(self) -> tuple[bytes, int, int]:
+        rgba = [0, 255, 0, 255] if self._smiling else [255, 255, 255, 255]
+        return (bytes(rgba * 4), 2, 2)
+
+    def close(self) -> None:
+        pass
+
+
+rerun_ui.spawn_viewer(connect_sdk=True)
+
+target = rerun_ui.FaceQuad(
+    entity_path="/robot/head/face",
+    parent_entity="/robot/head",
+    center_xyz=(0.0, 0.0, 0.0),
+    u_axis_xyz=(1.0, 0.0, 0.0),
+    v_axis_xyz=(0.0, 1.0, 0.0),
+    size_m=(0.2, 0.1),
+)
+
+handle = rerun_ui.attach_rive_face(target, renderer=SolidColorFace())
+handle.set_bool("smile", True)
+handle.advance(1.0 / 30.0, sim_time_s=0.0)
+handle.close()
+```
+
+#### Example: built-in Rive backend
+
+```python
+from __future__ import annotations
+
+import rerun_ui
+
+
+rerun_ui.spawn_viewer(connect_sdk=True)
+
+renderer = rerun_ui.create_rive_renderer(
+    riv_path="assets/robot_face.riv",
+    artboard="RobotFace",
+    state_machine="Face",
+    texture_size=(256, 256),
+)
+
+target = rerun_ui.FaceQuad(
+    entity_path="/robot/head/face",
+    parent_entity="/robot/head",
+    center_xyz=(0.0, 0.0, 0.0),
+    u_axis_xyz=(1.0, 0.0, 0.0),
+    v_axis_xyz=(0.0, 1.0, 0.0),
+    size_m=(0.2, 0.1),
+)
+
+handle = rerun_ui.attach_rive_face(target, renderer=renderer)
+handle.set_bool("smile", True)
+handle.fire_trigger("blink")
+handle.advance(1.0 / 30.0, sim_time_s=0.0)
+handle.close()
+```
+
+#### Built-in Rive backend caveats
+
+`create_rive_renderer(...)` now ships a real backend implemented as a Node subprocess that wraps the
+official `@rive-app/canvas-advanced` runtime and renders into RGBA frames via `skia-canvas`.
+
+Current limitations:
+
+- the Node helper packages are checked in as `package.json` + lockfile, but `node_modules` are **not**
+  vendored; run `npm install --prefix rerun_ui/_rive_node` once in a source checkout before using the
+  backend or the end-to-end renderer test.
+- the backend has been validated locally through `pytest` on this repo, but wheel/distribution wiring
+  for automatically bootstrapping the Node runtime is not finished yet.
+- it is a canvas/software-rendered path aimed at headless frame generation, not a zero-copy native
+  viewer integration.
 
 ### 3D pointer events
 
