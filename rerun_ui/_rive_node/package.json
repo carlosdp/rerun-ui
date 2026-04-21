@@ -1,0 +1,9 @@
+{
+  "name": "rerun-ui-rive-node-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@rive-app/canvas-advanced": "2.37.3",
+    "skia-canvas": "3.0.8"
+  }
+}

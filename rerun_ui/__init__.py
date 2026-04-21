@@ -13,7 +13,7 @@ from ._manager import (
     shutdown_viewer,
     spawn_viewer,
 )
-from ._rive_face import AnimatedFaceHandle, RiveFrameRenderer, attach_rive_face
+from ._rive_face import AnimatedFaceHandle, RiveFrameRenderer, attach_rive_face, create_rive_renderer
 from ._types import Key, Pointer3DEvent, PointerButton, PointerEventType, ViewerStatus
 
 __all__ = [
@@ -29,6 +29,7 @@ __all__ = [
     "RiveFrameRenderer",
     "create_face_surface",
     "attach_rive_face",
+    "create_rive_renderer",
     "spawn_viewer",
     "add_button",
     "handle_keyboard_input",

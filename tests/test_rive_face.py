@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+from pathlib import Path
+import shutil
 import threading
 import time
 
 import pytest
 import rerun as rr
 
-from rerun_ui import AnimatedFaceHandle, FaceQuad, RiveFrameRenderer, attach_rive_face
+from rerun_ui import (
+    AnimatedFaceHandle,
+    FaceQuad,
+    RiveFrameRenderer,
+    attach_rive_face,
+    create_rive_renderer,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+TEST_RIV_PATH = ROOT / "tests" / "assets" / "state_machine_test.riv"
+NODE_RIVE_RUNTIME_DIR = ROOT / "rerun_ui" / "_rive_node"
 
 
 class RecordingSpy:
@@ -73,10 +85,60 @@ def _make_quad() -> FaceQuad:
     )
 
 
+def _node_rive_runtime_installed() -> bool:
+    if shutil.which("node") is None:
+        return False
+    return (
+        (NODE_RIVE_RUNTIME_DIR / "renderer.mjs").exists()
+        and (NODE_RIVE_RUNTIME_DIR / "package.json").exists()
+        and (NODE_RIVE_RUNTIME_DIR / "node_modules" / "@rive-app" / "canvas-advanced" / "rive.wasm").exists()
+        and (NODE_RIVE_RUNTIME_DIR / "node_modules" / "skia-canvas").exists()
+    )
+
+
+@pytest.mark.skipif(
+    not _node_rive_runtime_installed(),
+    reason="requires `npm install --prefix rerun_ui/_rive_node` to bootstrap the Node Rive runtime",
+)
+def test_create_rive_renderer_renders_real_rive_frames() -> None:
+    renderer = create_rive_renderer(
+        riv_path=str(TEST_RIV_PATH),
+        artboard="MyArtboard",
+        state_machine="StateMachine",
+        texture_size=(64, 64),
+    )
+
+    try:
+        rgba_initial, width, height = renderer.render_rgba()
+        assert width == 64
+        assert height == 64
+        assert len(rgba_initial) == width * height * 4
+        assert any(rgba_initial)
+
+        renderer.set_number("MyNum", 5.0)
+        renderer.fire_trigger("MyTrig")
+        renderer.advance(0.1)
+        rgba_after_trigger, width_after_trigger, height_after_trigger = renderer.render_rgba()
+        assert width_after_trigger == 64
+        assert height_after_trigger == 64
+        assert len(rgba_after_trigger) == len(rgba_initial)
+
+        renderer.set_bool("MyBool", True)
+        renderer.advance(0.1)
+        rgba_after_bool, width_after_bool, height_after_bool = renderer.render_rgba()
+        assert width_after_bool == 64
+        assert height_after_bool == 64
+        assert rgba_after_bool != rgba_initial
+    finally:
+        renderer.close()
+        renderer.close()
+
+
 def test_rive_face_public_api_exports() -> None:
     assert AnimatedFaceHandle is not None
     assert RiveFrameRenderer is not None
     assert attach_rive_face is not None
+    assert create_rive_renderer is not None
 
 
 def test_attach_rive_face_manual_advance_updates_surface() -> None:
