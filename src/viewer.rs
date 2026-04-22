@@ -1,3 +1,4 @@
+use std::alloc::System;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -12,8 +13,7 @@ use rerun::external::{
 use crate::ipc::{self, ControlShared, PointerButton, PointerEventKind, ViewerEvent};
 
 #[global_allocator]
-static GLOBAL: re_memory::AccountingAllocator<mimalloc::MiMalloc> =
-    re_memory::AccountingAllocator::new(mimalloc::MiMalloc);
+static GLOBAL: re_memory::AccountingAllocator<System> = re_memory::AccountingAllocator::new(System);
 
 pub fn run_viewer_process(grpc_port: u16, control_port: u16) -> anyhow::Result<()> {
     // When running inside a Python host process, the actual process main thread

@@ -96,16 +96,67 @@ def _node_rive_runtime_installed() -> bool:
     )
 
 
-@pytest.mark.skipif(
-    not _node_rive_runtime_installed(),
-    reason="requires `npm install --prefix rerun_ui/_rive_node` to bootstrap the Node Rive runtime",
-)
-def test_create_rive_renderer_renders_real_rive_frames() -> None:
+def test_create_rive_renderer_native_backend() -> None:
     renderer = create_rive_renderer(
         riv_path=str(TEST_RIV_PATH),
         artboard="MyArtboard",
         state_machine="StateMachine",
         texture_size=(64, 64),
+        backend="native",
+    )
+
+    try:
+        assert getattr(renderer, "backend_kind") == "native"
+    finally:
+        renderer.close()
+
+
+def test_native_rive_renderer_renders_real_frames() -> None:
+    renderer = create_rive_renderer(
+        riv_path=str(TEST_RIV_PATH),
+        artboard="MyArtboard",
+        state_machine="StateMachine",
+        texture_size=(64, 64),
+        backend="native",
+    )
+
+    try:
+        rgba_initial, width, height = renderer.render_rgba()
+        assert width == 64
+        assert height == 64
+        assert len(rgba_initial) == width * height * 4
+        assert any(rgba_initial)
+
+        renderer.set_number("MyNum", 5.0)
+        renderer.fire_trigger("MyTrig")
+        renderer.advance(0.1)
+        rgba_after_trigger, width_after_trigger, height_after_trigger = renderer.render_rgba()
+        assert width_after_trigger == 64
+        assert height_after_trigger == 64
+        assert len(rgba_after_trigger) == len(rgba_initial)
+
+        renderer.set_bool("MyBool", True)
+        renderer.advance(0.1)
+        rgba_after_bool, width_after_bool, height_after_bool = renderer.render_rgba()
+        assert width_after_bool == 64
+        assert height_after_bool == 64
+        assert rgba_after_bool != rgba_initial
+    finally:
+        renderer.close()
+        renderer.close()
+
+
+@pytest.mark.skipif(
+    not _node_rive_runtime_installed(),
+    reason="requires `npm install --prefix rerun_ui/_rive_node` to bootstrap the Node Rive runtime",
+)
+def test_node_rive_renderer_renders_real_rive_frames() -> None:
+    renderer = create_rive_renderer(
+        riv_path=str(TEST_RIV_PATH),
+        artboard="MyArtboard",
+        state_machine="StateMachine",
+        texture_size=(64, 64),
+        backend="node",
     )
 
     try:

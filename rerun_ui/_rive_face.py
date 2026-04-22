@@ -17,6 +17,11 @@ from ._face_surface import FacePatchMesh, FaceQuad, FaceSurface, create_face_sur
 
 LOGGER = logging.getLogger(__name__)
 
+try:
+    from ._rerun_ui import NativeRiveRenderer as _NativeRiveRenderer
+except ImportError:  # pragma: no cover - exercised only when the extension is unavailable
+    _NativeRiveRenderer = None
+
 
 class RiveFrameRenderer(Protocol):
     def set_bool(self, input_name: str, value: bool) -> None: ...
@@ -33,6 +38,8 @@ class RiveFrameRenderer(Protocol):
 
 
 class _NodeRiveRenderer:
+    backend_kind = "node"
+
     def __init__(
         self,
         *,
@@ -346,14 +353,51 @@ def create_rive_renderer(
     artboard: str,
     state_machine: str,
     texture_size: tuple[int, int] = (256, 256),
+    backend: str = "native",
     node_executable: str = "node",
 ) -> RiveFrameRenderer:
-    return _NodeRiveRenderer(
-        riv_path=riv_path,
-        artboard=artboard,
-        state_machine=state_machine,
-        texture_size=texture_size,
-        node_executable=node_executable,
+    normalized_backend = _normalize_backend_name(backend)
+    if normalized_backend == "native":
+        return _create_native_rive_renderer(
+            riv_path=riv_path,
+            artboard=artboard,
+            state_machine=state_machine,
+            texture_size=texture_size,
+        )
+    if normalized_backend == "node":
+        return _NodeRiveRenderer(
+            riv_path=riv_path,
+            artboard=artboard,
+            state_machine=state_machine,
+            texture_size=texture_size,
+            node_executable=node_executable,
+        )
+    raise ValueError(f"Unsupported Rive backend '{backend}'. Expected 'native' or 'node'.")
+
+
+def _create_native_rive_renderer(
+    *,
+    riv_path: str | PathLike[str],
+    artboard: str,
+    state_machine: str,
+    texture_size: tuple[int, int],
+) -> RiveFrameRenderer:
+    if _NativeRiveRenderer is None:
+        raise RuntimeError(
+            "The native Rive backend is unavailable because the rerun_ui native extension is not importable. "
+            "Run `maturin develop` after initializing the pinned `third_party/rive-cpp` submodule."
+        )
+
+    validated_path = _validate_riv_path(riv_path)
+    validated_artboard = _validate_name(artboard, field_name="artboard")
+    validated_state_machine = _validate_name(state_machine, field_name="state_machine")
+    width, height = _validate_texture_size(texture_size)
+    return _NativeRiveRenderer(
+        riv_path=str(validated_path),
+        artboard=validated_artboard,
+        state_machine=validated_state_machine,
+        width=width,
+        height=height,
     )
 
 
@@ -365,6 +409,15 @@ def attach_rive_face(
 ) -> AnimatedFaceHandle:
     surface = create_face_surface(target, recording=recording)
     return AnimatedFaceHandle(surface=surface, renderer=renderer)
+
+
+def _normalize_backend_name(backend: str) -> str:
+    if not isinstance(backend, str):
+        raise TypeError("backend must be a string")
+    normalized = backend.strip().lower()
+    if not normalized:
+        raise ValueError("backend must not be empty")
+    return normalized
 
 
 def _node_runtime_dir() -> Path:

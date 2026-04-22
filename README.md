@@ -14,11 +14,18 @@ The package:
 This project is a mixed PyO3 + Python package built with `maturin`.
 
 ```bash
+git submodule update --init --recursive
 maturin develop
 ```
 
-To use the built-in Rive renderer backend from a source checkout, also bootstrap the bundled
-Node helper runtime once:
+On Debian/Ubuntu source checkouts, install `libcairo2-dev` first so the native renderer shim can
+link against Cairo.
+
+`create_rive_renderer(...)` now defaults to a **native** backend built on the official
+`rive-app/rive-cpp` runtime and a small Cairo-based software rasterizer shim compiled into the
+PyO3 extension.
+
+The legacy Node helper remains available as an explicit fallback:
 
 ```bash
 npm install --prefix rerun_ui/_rive_node
@@ -92,7 +99,7 @@ Public types and helpers:
 - `RiveFrameRenderer`
 - `create_face_surface(target, recording=None) -> FaceSurface`
 - `attach_rive_face(target, renderer, recording=None) -> AnimatedFaceHandle`
-- `create_rive_renderer(riv_path, artboard, state_machine, texture_size=(256, 256)) -> RiveFrameRenderer`
+- `create_rive_renderer(riv_path, artboard, state_machine, texture_size=(256, 256), backend="native") -> RiveFrameRenderer`
 
 Use `FaceQuad` when a flat face panel is enough. Use `FacePatchMesh` when the face surface should
 follow custom or curved geometry with explicit UVs.
@@ -186,18 +193,22 @@ handle.close()
 
 #### Built-in Rive backend caveats
 
-`create_rive_renderer(...)` now ships a real backend implemented as a Node subprocess that wraps the
-official `@rive-app/canvas-advanced` runtime and renders into RGBA frames via `skia-canvas`.
+`create_rive_renderer(...)` now defaults to a native backend implemented inside the existing
+Rust/PyO3 extension. The native path:
+
+- loads `.riv` files through the official `rive-app/rive-cpp` runtime,
+- drives artboards + state machines natively from C++/Rust,
+- rasterizes into RGBA via a Cairo software renderer shim.
 
 Current limitations:
 
-- the Node helper packages are checked in as `package.json` + lockfile, but `node_modules` are **not**
-  vendored; run `npm install --prefix rerun_ui/_rive_node` once in a source checkout before using the
-  backend or the end-to-end renderer test.
-- the backend has been validated locally through `pytest` on this repo, but wheel/distribution wiring
-  for automatically bootstrapping the Node runtime is not finished yet.
-- it is a canvas/software-rendered path aimed at headless frame generation, not a zero-copy native
-  viewer integration.
+- source checkouts must initialize the pinned `third_party/rive-cpp` submodule before running
+  `maturin develop`.
+- the current native rasterizer is validated on the bundled regression asset and path-based state
+  machine content; image-backed Rive assets are not implemented yet and will raise an error through
+  the native path.
+- the explicit Node fallback is still available with `backend="node"`, but it still requires
+  `npm install --prefix rerun_ui/_rive_node` in a source checkout.
 
 ### 3D pointer events
 
