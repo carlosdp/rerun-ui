@@ -5,6 +5,7 @@
 The package:
 - runs the viewer in a separate process,
 - adds custom controls (buttons + keyboard input),
+- logs animated robot face surfaces into the existing 3D scene,
 - reconnects on demand after crashes,
 - reuses any existing viewer process already bound to the configured ports.
 
@@ -13,7 +14,21 @@ The package:
 This project is a mixed PyO3 + Python package built with `maturin`.
 
 ```bash
+git submodule update --init --recursive
 maturin develop
+```
+
+On Debian/Ubuntu source checkouts, install `libcairo2-dev` first so the native renderer shim can
+link against Cairo.
+
+`create_rive_renderer(...)` now defaults to a **native** backend built on the official
+`rive-app/rive-cpp` runtime and a small Cairo-based software rasterizer shim compiled into the
+PyO3 extension.
+
+The legacy Node helper remains available as an explicit fallback:
+
+```bash
+npm install --prefix rerun_ui/_rive_node
 ```
 
 For wheels:
@@ -69,6 +84,131 @@ rerun_ui.handle_3d_view_click(on_3d_pointer)
 - `is_custom_ui_available() -> bool`
 - `disconnect() -> None`
 - `shutdown_viewer() -> None`
+
+### Animated face surface API
+
+The face-surface API is Python-first and logs a dedicated face patch entity into the existing
+Rerun 3D scene. It does **not** require Rust viewer changes.
+
+Public types and helpers:
+
+- `FaceQuad`
+- `FacePatchMesh`
+- `FaceSurface`
+- `AnimatedFaceHandle`
+- `RiveFrameRenderer`
+- `create_face_surface(target, recording=None) -> FaceSurface`
+- `attach_rive_face(target, renderer, recording=None) -> AnimatedFaceHandle`
+- `create_rive_renderer(riv_path, artboard, state_machine, texture_size=(256, 256), backend="native") -> RiveFrameRenderer`
+
+Use `FaceQuad` when a flat face panel is enough. Use `FacePatchMesh` when the face surface should
+follow custom or curved geometry with explicit UVs.
+
+`FaceSurface` logs static mesh and transform data once, then updates the same entity path with fresh
+RGBA texture payloads over time.
+
+#### Example: animated face with a simple renderer backend
+
+```python
+from __future__ import annotations
+
+import rerun_ui
+
+
+class SolidColorFace:
+    def __init__(self) -> None:
+        self._smiling = False
+
+    def set_bool(self, input_name: str, value: bool) -> None:
+        if input_name == "smile":
+            self._smiling = value
+
+    def set_number(self, input_name: str, value: float) -> None:
+        pass
+
+    def fire_trigger(self, input_name: str) -> None:
+        if input_name == "blink":
+            self._smiling = not self._smiling
+
+    def advance(self, dt_s: float) -> None:
+        pass
+
+    def render_rgba(self) -> tuple[bytes, int, int]:
+        rgba = [0, 255, 0, 255] if self._smiling else [255, 255, 255, 255]
+        return (bytes(rgba * 4), 2, 2)
+
+    def close(self) -> None:
+        pass
+
+
+rerun_ui.spawn_viewer(connect_sdk=True)
+
+target = rerun_ui.FaceQuad(
+    entity_path="/robot/head/face",
+    parent_entity="/robot/head",
+    center_xyz=(0.0, 0.0, 0.0),
+    u_axis_xyz=(1.0, 0.0, 0.0),
+    v_axis_xyz=(0.0, 1.0, 0.0),
+    size_m=(0.2, 0.1),
+)
+
+handle = rerun_ui.attach_rive_face(target, renderer=SolidColorFace())
+handle.set_bool("smile", True)
+handle.advance(1.0 / 30.0, sim_time_s=0.0)
+handle.close()
+```
+
+#### Example: built-in Rive backend
+
+```python
+from __future__ import annotations
+
+import rerun_ui
+
+
+rerun_ui.spawn_viewer(connect_sdk=True)
+
+renderer = rerun_ui.create_rive_renderer(
+    riv_path="assets/robot_face.riv",
+    artboard="RobotFace",
+    state_machine="Face",
+    texture_size=(256, 256),
+)
+
+target = rerun_ui.FaceQuad(
+    entity_path="/robot/head/face",
+    parent_entity="/robot/head",
+    center_xyz=(0.0, 0.0, 0.0),
+    u_axis_xyz=(1.0, 0.0, 0.0),
+    v_axis_xyz=(0.0, 1.0, 0.0),
+    size_m=(0.2, 0.1),
+)
+
+handle = rerun_ui.attach_rive_face(target, renderer=renderer)
+handle.set_bool("smile", True)
+handle.fire_trigger("blink")
+handle.advance(1.0 / 30.0, sim_time_s=0.0)
+handle.close()
+```
+
+#### Built-in Rive backend caveats
+
+`create_rive_renderer(...)` now defaults to a native backend implemented inside the existing
+Rust/PyO3 extension. The native path:
+
+- loads `.riv` files through the official `rive-app/rive-cpp` runtime,
+- drives artboards + state machines natively from C++/Rust,
+- rasterizes into RGBA via a Cairo software renderer shim.
+
+Current limitations:
+
+- source checkouts must initialize the pinned `third_party/rive-cpp` submodule before running
+  `maturin develop`.
+- the current native rasterizer is validated on the bundled regression asset and path-based state
+  machine content; image-backed Rive assets are not implemented yet and will raise an error through
+  the native path.
+- the explicit Node fallback is still available with `backend="node"`, but it still requires
+  `npm install --prefix rerun_ui/_rive_node` in a source checkout.
 
 ### 3D pointer events
 
