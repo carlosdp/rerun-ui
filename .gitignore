@@ -230,6 +230,13 @@ __marimo__/
 /vendor/re_view_spatial/.cargo_vcs_info.json
 /vendor/re_view_spatial/Cargo.lock
 /vendor/re_view_spatial/Cargo.toml.orig
+!/vendor/re_view_state_timeline/
+!/vendor/re_view_state_timeline/**
+/vendor/re_view_state_timeline/tests/
+/vendor/re_view_state_timeline/.cargo-ok
+/vendor/re_view_state_timeline/.cargo_vcs_info.json
+/vendor/re_view_state_timeline/Cargo.lock
+/vendor/re_view_state_timeline/Cargo.toml.orig
 debug/
 target-alpine/
 target/

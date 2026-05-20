@@ -1,6 +1,6 @@
 [package]
 name = "rerun-ui"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
@@ -21,6 +21,7 @@ serde_json = "1.0"
 
 [patch.crates-io]
 re_view_spatial = { path = "vendor/re_view_spatial" }
+re_view_state_timeline = { path = "vendor/re_view_state_timeline" }
 
 [profile.release]
 lto = "thin"

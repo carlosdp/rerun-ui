@@ -7913,8 +7913,6 @@ dependencies = [
 [[package]]
 name = "re_view_state_timeline"
 version = "0.32.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df9cde6340973d3b1a4452bebbfb20a0859c274e5a74bf13f15ee61dc11f37b8"
 dependencies = [
  "egui",
  "re_byte_size",
@@ -8461,7 +8459,7 @@ dependencies = [
 
 [[package]]
 name = "rerun-ui"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "mimalloc",
