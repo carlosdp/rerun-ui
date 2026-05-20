@@ -91,11 +91,11 @@ impl CustomViewerApp {
         }
     }
 
-    fn render_controls(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("rerun_ui_controls")
+    fn render_controls(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::bottom("rerun_ui_controls")
             .resizable(false)
-            .default_height(92.0)
-            .show(ctx, |ui| {
+            .default_size(92.0)
+            .show_inside(ui, |ui| {
                 let buttons = self.control.buttons();
                 ui.horizontal_wrapped(|ui| {
                     ui.set_min_height(72.0);
@@ -148,15 +148,23 @@ impl CustomViewerApp {
 }
 
 impl eframe::App for CustomViewerApp {
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        eframe::App::clear_color(&self.rerun_app, visuals)
+    }
+
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.rerun_app.save(storage);
     }
 
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         re_view_spatial::set_pointer_listeners_enabled(self.control.pointer_config().enabled);
-        self.render_controls(ctx);
         self.emit_keyboard_events(ctx);
-        self.rerun_app.update(ctx, frame);
+        self.rerun_app.logic(ctx, frame);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.render_controls(ui);
+        self.rerun_app.ui(ui, frame);
     }
 }
 

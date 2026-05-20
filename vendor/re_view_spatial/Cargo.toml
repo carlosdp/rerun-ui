@@ -11,9 +11,9 @@
 
 [package]
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.92"
 name = "re_view_spatial"
-version = "0.29.2"
+version = "0.32.2"
 authors = ["rerun.io <opensource@rerun.io>"]
 build = false
 include = [
@@ -48,6 +48,10 @@ path = "src/lib.rs"
 bench = false
 
 [[test]]
+name = "annotation_context_update"
+path = "tests/annotation_context_update.rs"
+
+[[test]]
 name = "annotations"
 path = "tests/annotations.rs"
 
@@ -60,6 +64,10 @@ name = "blueprint_2d"
 path = "tests/blueprint_2d.rs"
 
 [[test]]
+name = "chroma_subsampling"
+path = "tests/chroma_subsampling.rs"
+
+[[test]]
 name = "dae_mesh"
 path = "tests/dae_mesh.rs"
 
@@ -68,24 +76,52 @@ name = "draw_order"
 path = "tests/draw_order.rs"
 
 [[test]]
+name = "grid_map"
+path = "tests/grid_map.rs"
+
+[[test]]
 name = "latest_at_partial_updates"
 path = "tests/latest_at_partial_updates.rs"
+
+[[test]]
+name = "magnification_filter"
+path = "tests/magnification_filter.rs"
 
 [[test]]
 name = "mesh"
 path = "tests/mesh.rs"
 
 [[test]]
+name = "mesh_face_rendering"
+path = "tests/mesh_face_rendering.rs"
+
+[[test]]
 name = "opacity_2d"
 path = "tests/opacity_2d.rs"
+
+[[test]]
+name = "partial_view_visibility"
+path = "tests/partial_view_visibility.rs"
 
 [[test]]
 name = "pinhole_camera"
 path = "tests/pinhole_camera.rs"
 
 [[test]]
+name = "pinhole_draw_order"
+path = "tests/pinhole_draw_order.rs"
+
+[[test]]
+name = "points2d_ui_radius"
+path = "tests/points2d_ui_radius.rs"
+
+[[test]]
 name = "project_2d_and_3d"
 path = "tests/project_2d_and_3d.rs"
+
+[[test]]
+name = "segmentation_image_transparency"
+path = "tests/segmentation_image_transparency.rs"
 
 [[test]]
 name = "select_box_instances"
@@ -120,6 +156,10 @@ name = "transform_tree_origins"
 path = "tests/transform_tree_origins.rs"
 
 [[test]]
+name = "transform_tree_visualization"
+path = "tests/transform_tree_visualization.rs"
+
+[[test]]
 name = "transparent_geometry"
 path = "tests/transparent_geometry.rs"
 
@@ -135,11 +175,11 @@ path = "tests/visible_time_range.rs"
 version = "0.8"
 
 [dependencies.anyhow]
-version = "1.0"
+version = "1.0.102"
 default-features = false
 
 [dependencies.arrow]
-version = "56.1"
+version = "57.3.0"
 features = [
     "ffi",
     "ipc",
@@ -148,15 +188,15 @@ features = [
 default-features = false
 
 [dependencies.bitflags]
-version = "2.9"
+version = "2.11"
 features = ["bytemuck"]
 
 [dependencies.bytemuck]
-version = "1.24"
+version = "1.25"
 features = ["extern_crate_alloc"]
 
 [dependencies.egui]
-version = "0.33.3"
+version = "0.34.2"
 features = [
     "callstack",
     "color-hex",
@@ -165,7 +205,7 @@ features = [
 ]
 
 [dependencies.glam]
-version = "0.30.8"
+version = "0.30.10"
 features = [
     "debug-glam-assert",
     "serde",
@@ -197,50 +237,53 @@ version = "0.2.0"
 version = "5.1.0"
 
 [dependencies.re_arrow_util]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_byte_size]
-version = "0.29.2"
+version = "0.32.2"
+features = [
+    "ecolor",
+    "egui",
+    "glam",
+    "macaw",
+]
 default-features = false
 
 [dependencies.re_chunk_store]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_data_ui]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_entity_db]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_error]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_format]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_log]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_log_types]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
-[dependencies.re_mp4]
-version = "0.4.0"
-
 [dependencies.re_query]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_renderer]
-version = "0.29.2"
+version = "0.32.2"
 features = [
     "import-gltf",
     "import-obj",
@@ -250,11 +293,11 @@ features = [
 default-features = false
 
 [dependencies.re_rvl]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_sdk_types]
-version = "0.29.2"
+version = "0.32.2"
 features = [
     "ecolor",
     "glam",
@@ -263,31 +306,31 @@ features = [
 default-features = false
 
 [dependencies.re_tf]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_tracing]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_ui]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_video]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_view]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_viewer_context]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.re_viewport_blueprint]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dependencies.saturating_cast]
@@ -306,7 +349,7 @@ features = [
 ]
 
 [dependencies.thiserror]
-version = "2.0.17"
+version = "2.0.18"
 
 [dependencies.vec1]
 version = "1.12"
@@ -316,29 +359,32 @@ features = [
 ]
 
 [dev-dependencies.half]
-version = "2.6.0"
+version = "2.7.1"
 features = ["bytemuck"]
 
 [dev-dependencies.insta]
-version = "1.43"
+version = "1.46"
 
 [dev-dependencies.ndarray]
 version = "0.16.1"
 
 [dev-dependencies.re_component_ui]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
+[dev-dependencies.re_mp4]
+version = "0.5.0"
+
 [dev-dependencies.re_test_context]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dev-dependencies.re_test_viewport]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [dev-dependencies.re_viewport]
-version = "0.29.2"
+version = "0.32.2"
 default-features = false
 
 [lints.clippy]
@@ -386,10 +432,12 @@ flat_map_option = "warn"
 float_cmp_const = "warn"
 fn_params_excessive_bools = "warn"
 fn_to_numeric_cast_any = "warn"
+format_push_string = "warn"
 from_iter_instead_of_collect = "warn"
 get_unwrap = "warn"
 if_let_mutex = "warn"
 ignore_without_reason = "warn"
+ignored_unit_patterns = "warn"
 implicit_clone = "warn"
 implied_bounds_in_impls = "warn"
 imprecise_flops = "warn"
@@ -442,6 +490,7 @@ mismatching_type_param_order = "warn"
 missing_assert_message = "allow"
 missing_enforced_import_renames = "warn"
 missing_errors_doc = "allow"
+missing_fields_in_debug = "warn"
 missing_safety_doc = "warn"
 mixed_attributes_style = "warn"
 mut_mut = "warn"
@@ -470,12 +519,13 @@ rc_mutex = "warn"
 readonly_write_lock = "warn"
 redundant_type_annotations = "warn"
 ref_as_ptr = "warn"
-ref_option = "allow"
+ref_option = "warn"
 ref_option_ref = "warn"
 ref_patterns = "allow"
 rest_pat_in_fully_bound_structs = "warn"
 return_and_then = "warn"
 same_functions_in_if_condition = "warn"
+self_only_used_in_recursion = "warn"
 semicolon_if_nothing_returned = "warn"
 set_contains_or_insert = "warn"
 should_panic_without_expect = "warn"
@@ -498,7 +548,7 @@ trailing_empty_array = "warn"
 trait_duplication_in_bounds = "warn"
 transmute_ptr_to_ptr = "warn"
 tuple_array_conversions = "warn"
-unchecked_duration_subtraction = "warn"
+unchecked_time_subtraction = "warn"
 undocumented_unsafe_blocks = "warn"
 unimplemented = "warn"
 uninhabited_references = "warn"

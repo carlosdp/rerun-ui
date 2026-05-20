@@ -67,6 +67,31 @@ impl MaxImageDimensionsStoreSubscriber {
     }
 }
 
+impl re_byte_size::SizeBytes for MaxDimensions {
+    #[inline]
+    fn heap_size_bytes(&self) -> u64 {
+        0
+    }
+
+    #[inline]
+    fn is_pod() -> bool {
+        true
+    }
+}
+
+impl re_byte_size::MemUsageTreeCapture for MaxImageDimensionsStoreSubscriber {
+    fn capture_mem_usage_tree(&self) -> re_byte_size::MemUsageTree {
+        use re_byte_size::SizeBytes as _;
+        let Self {
+            max_dimensions,
+            video_codecs,
+        } = self;
+        re_byte_size::MemUsageTree::Bytes(
+            max_dimensions.heap_size_bytes() + video_codecs.heap_size_bytes(),
+        )
+    }
+}
+
 impl PerStoreChunkSubscriber for MaxImageDimensionsStoreSubscriber {
     #[inline]
     fn name() -> String {
@@ -258,15 +283,10 @@ fn try_size_from_blob(
         re_tracing::profile_scope!("video asset");
 
         let media_type = components::MediaType::or_guess_from_data(media_type, blob)?;
-        re_video::VideoDataDescription::load_from_bytes(
-            blob,
-            media_type.as_str(),
-            debug_name,
-            re_log_types::external::re_tuid::Tuid::new(),
-        )
-        .ok()
-        .and_then(|video| video.encoding_details.map(|e| e.coded_dimensions))
-        .map(|[w, h]| [w as _, h as _])
+        re_video::VideoDataDescription::load_from_bytes(blob, media_type.as_str(), debug_name)
+            .ok()
+            .and_then(|video| video.encoding_details.map(|e| e.coded_dimensions))
+            .map(|[w, h]| [w as _, h as _])
     } else {
         None
     }
@@ -296,6 +316,8 @@ fn try_size_from_video_stream_sample(
         components::VideoCodec::H264 => re_video::VideoCodec::H264,
         components::VideoCodec::H265 => re_video::VideoCodec::H265,
         components::VideoCodec::AV1 => re_video::VideoCodec::AV1,
+        components::VideoCodec::VP8 => re_video::VideoCodec::VP8,
+        components::VideoCodec::VP9 => re_video::VideoCodec::VP9,
     };
 
     match re_video::detect_gop_start(sample, codec).ok()? {

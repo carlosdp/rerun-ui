@@ -42,7 +42,13 @@ pub use pointer_events::{
     set_pointer_event_callback, set_pointer_listeners_enabled, should_capture_interactions,
 };
 
+// Export some other types that are useful for extensions.
+pub use contexts::TransformTreeContext;
+
 mod view_kind {
+    /// Whether a spatial visualizer prefers 2D or 3D views.
+    ///
+    /// Used by heuristics to determine which entities belong to which spatial view kind.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum SpatialViewKind {
         TwoD,

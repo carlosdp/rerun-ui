@@ -1,29 +1,19 @@
 use re_sdk_types::Archetype as _;
 use re_sdk_types::archetypes::SegmentationImage;
-use re_sdk_types::components::{ImageFormat, Opacity};
+use re_sdk_types::components::{ImageBuffer, ImageFormat, MagnificationFilter, Opacity};
 use re_sdk_types::image::ImageKind;
 use re_viewer_context::{
-    IdentifiedViewSystem, ImageInfo, ViewContext, ViewContextCollection, ViewQuery,
-    ViewSystemExecutionError, VisualizerExecutionOutput, VisualizerQueryInfo, VisualizerSystem,
-    typed_fallback_for,
+    IdentifiedViewSystem, ImageInfo, ViewClass as _, ViewContext, ViewContextCollection, ViewQuery,
+    ViewSystemExecutionError, VisualizerExecutionOutput, VisualizerQueryInfo,
+    VisualizerReportSeverity, VisualizerSystem, typed_fallback_for,
 };
 
 use super::SpatialViewVisualizerData;
-use crate::view_kind::SpatialViewKind;
 use crate::visualizers::textured_rect_from_image;
 use crate::{PickableRectSourceData, PickableTexturedRect};
 
-pub struct SegmentationImageVisualizer {
-    pub data: SpatialViewVisualizerData,
-}
-
-impl Default for SegmentationImageVisualizer {
-    fn default() -> Self {
-        Self {
-            data: SpatialViewVisualizerData::new(Some(SpatialViewKind::TwoD)),
-        }
-    }
-}
+#[derive(Default)]
+pub struct SegmentationImageVisualizer;
 
 struct SegmentationImageComponentData {
     image: ImageInfo,
@@ -41,50 +31,52 @@ impl VisualizerSystem for SegmentationImageVisualizer {
         &self,
         _app_options: &re_viewer_context::AppOptions,
     ) -> VisualizerQueryInfo {
-        VisualizerQueryInfo::from_archetype::<SegmentationImage>()
+        VisualizerQueryInfo::buffer_and_format::<ImageBuffer, ImageFormat>(
+            &SegmentationImage::descriptor_buffer(),
+            &SegmentationImage::descriptor_format(),
+            &SegmentationImage::all_components(),
+        )
+    }
+
+    fn affinity(&self) -> Option<re_sdk_types::ViewClassIdentifier> {
+        Some(crate::SpatialView2D::identifier())
     }
 
     fn execute(
-        &mut self,
+        &self,
         ctx: &ViewContext<'_>,
         view_query: &ViewQuery<'_>,
         context_systems: &ViewContextCollection,
     ) -> Result<VisualizerExecutionOutput, ViewSystemExecutionError> {
-        let mut output = VisualizerExecutionOutput::default();
+        let mut data = SpatialViewVisualizerData::default();
+        let output = VisualizerExecutionOutput::default();
 
-        use super::entity_iterator::{iter_component, iter_slices, process_archetype};
-        process_archetype::<Self, SegmentationImage, _>(
+        use super::entity_iterator::process_archetype;
+        process_archetype::<SegmentationImage, _, _>(
             ctx,
             view_query,
             context_systems,
-            &mut output,
-            self.data.preferred_view_kind,
+            &output,
+            self,
             |ctx, spatial_ctx, results| {
-                use re_view::RangeResultsExt as _;
-
                 let entity_path = ctx.target_entity_path;
 
-                let all_buffer_chunks =
-                    results.get_required_chunk(SegmentationImage::descriptor_buffer().component);
-                if all_buffer_chunks.is_empty() {
+                let all_buffers =
+                    results.iter_required(SegmentationImage::descriptor_buffer().component);
+                if all_buffers.is_empty() {
                     return Ok(());
                 }
-                let all_formats_chunks =
-                    results.get_required_chunk(SegmentationImage::descriptor_format().component);
-                if all_formats_chunks.is_empty() {
+                let all_formats =
+                    results.iter_required(SegmentationImage::descriptor_format().component);
+                if all_formats.is_empty() {
                     return Ok(());
                 }
-
-                let timeline = ctx.query.timeline();
-                let all_buffers_indexed = iter_slices::<&[u8]>(&all_buffer_chunks, timeline);
-                let all_formats_indexed =
-                    iter_component::<ImageFormat>(&all_formats_chunks, timeline);
                 let all_opacities =
-                    results.iter_as(timeline, SegmentationImage::descriptor_opacity().component);
+                    results.iter_optional(SegmentationImage::descriptor_opacity().component);
 
-                let data = re_query::range_zip_1x2(
-                    all_buffers_indexed,
-                    all_formats_indexed,
+                let image_data = re_query::range_zip_1x2(
+                    all_buffers.slice::<&[u8]>(),
+                    all_formats.component_slow::<ImageFormat>(),
                     all_opacities.slice::<f32>(),
                 )
                 .filter_map(|((_time, row_id), buffers, formats, opacity)| {
@@ -101,8 +93,8 @@ impl VisualizerSystem for SegmentationImageVisualizer {
                     })
                 });
 
-                for data in data {
-                    let SegmentationImageComponentData { image, opacity } = data;
+                for image_data in image_data {
+                    let SegmentationImageComponentData { image, opacity } = image_data;
 
                     let opacity = opacity.unwrap_or_else(|| {
                         typed_fallback_for(ctx, SegmentationImage::descriptor_opacity().component)
@@ -119,10 +111,11 @@ impl VisualizerSystem for SegmentationImageVisualizer {
                         &image,
                         colormap,
                         multiplicative_tint,
+                        MagnificationFilter::default(),
                         SegmentationImage::name(),
                     ) {
                         Ok(textured_rect) => {
-                            self.data.add_pickable_rect(
+                            data.add_pickable_rect(
                                 PickableTexturedRect {
                                     ent_path: entity_path.clone(),
                                     textured_rect,
@@ -135,9 +128,11 @@ impl VisualizerSystem for SegmentationImageVisualizer {
                             );
                         }
                         Err(err) => {
-                            spatial_ctx
-                                .output
-                                .report_error_for(entity_path.clone(), re_error::format(err));
+                            results.report_for_component(
+                                SegmentationImage::descriptor_buffer().component,
+                                VisualizerReportSeverity::Error,
+                                re_error::format(err),
+                            );
                         }
                     }
                 }
@@ -145,14 +140,12 @@ impl VisualizerSystem for SegmentationImageVisualizer {
             },
         )?;
 
-        Ok(output.with_draw_data([PickableTexturedRect::to_draw_data(
-            ctx.viewer_ctx.render_ctx(),
-            &self.data.pickable_rects,
-        )?]))
-    }
-
-    fn data(&self) -> Option<&dyn std::any::Any> {
-        Some(self.data.as_any())
+        Ok(output
+            .with_draw_data([PickableTexturedRect::to_draw_data(
+                ctx.viewer_ctx.render_ctx(),
+                &data.pickable_rects,
+            )?])
+            .with_visualizer_data(data))
     }
 }
 

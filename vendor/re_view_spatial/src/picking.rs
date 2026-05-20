@@ -49,6 +49,36 @@ pub struct PickingResult {
     pub hits: Vec<PickingRayHit>,
 }
 
+impl re_byte_size::SizeBytes for PickingHitType {
+    #[inline]
+    fn heap_size_bytes(&self) -> u64 {
+        0
+    }
+
+    #[inline]
+    fn is_pod() -> bool {
+        true
+    }
+}
+
+impl re_byte_size::SizeBytes for PickingRayHit {
+    #[inline]
+    fn heap_size_bytes(&self) -> u64 {
+        0
+    }
+
+    #[inline]
+    fn is_pod() -> bool {
+        true
+    }
+}
+
+impl re_byte_size::SizeBytes for PickingResult {
+    fn heap_size_bytes(&self) -> u64 {
+        re_byte_size::SizeBytes::heap_size_bytes(&self.hits)
+    }
+}
+
 impl PickingResult {
     pub fn space_position(&self) -> Option<glam::Vec3> {
         // Use gpu hit if available as they are usually the position one expects.
@@ -64,7 +94,6 @@ impl PickingResult {
 /// Picking context in which picking is performed.
 pub struct PickingContext {
     /// Cursor position in the UI coordinate system.
-    #[expect(unused)]
     pub pointer_in_ui: glam::Vec2,
 
     /// Cursor position on the renderer canvas in pixels.
@@ -121,7 +150,7 @@ impl PickingContext {
         &self,
         render_ctx: &re_renderer::RenderContext,
         gpu_readback_identifier: re_renderer::GpuReadbackIdentifier,
-        previous_picking_result: &Option<PickingResult>,
+        previous_picking_result: Option<&PickingResult>,
         images: impl Iterator<Item = &'a PickableTexturedRect>,
         ui_rects: &[PickableUiRect],
     ) -> PickingResult {
@@ -136,7 +165,7 @@ impl PickingContext {
         );
 
         let mut image_hits = picking_textured_rects(self, images);
-        image_hits.sort_by(|a, b| b.depth_offset.cmp(&a.depth_offset));
+        image_hits.sort_by_key(|a| std::cmp::Reverse(a.depth_offset));
 
         let ui_hits = picking_ui_rects(self, ui_rects);
 
@@ -189,7 +218,7 @@ fn picking_gpu(
     render_ctx: &re_renderer::RenderContext,
     gpu_readback_identifier: u64,
     context: &PickingContext,
-    previous_picking_result: &Option<PickingResult>,
+    previous_picking_result: Option<&PickingResult>,
 ) -> Option<PickingRayHit> {
     re_tracing::profile_function!();
 

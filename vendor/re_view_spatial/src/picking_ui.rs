@@ -1,31 +1,36 @@
 use egui::NumExt as _;
-use re_data_ui::{item_ui, DataUi as _};
+use re_chunk_store::MissingChunkReporter;
+use re_data_ui::{DataUi as _, item_ui};
 use re_log_types::Instance;
 use re_renderer::ViewPickingConfiguration;
-use re_ui::list_item::{list_item_scope, PropertyContent};
 use re_ui::UiExt as _;
+use re_ui::list_item::{PropertyContent, list_item_scope};
 use re_view::AnnotationSceneContext;
 use re_viewer_context::{
-    Item, ItemCollection, ItemContext, UiLayout, ViewQuery, ViewSystemExecutionError,
-    ViewerContext, VisualizerCollection,
+    DataResultInteractionAddress, IdentifiedViewSystem as _, Item, ItemCollection, ItemContext,
+    UiLayout, ViewQuery, ViewSystemExecutionError, ViewerContext,
 };
 
 use crate::visualizers::DepthImageProcessResult;
 use crate::{
+    PickableRectSourceData, PickableTexturedRect,
     picking::{PickableUiRect, PickingContext, PickingHitType},
-    picking_ui_pixel::{textured_rect_hover_ui, PickedPixelInfo},
+    picking_ui_pixel::{
+        PickedPixelInfo, TextureInteractionId, depth_value_from_gpu_texture, textured_rect_hover_ui,
+    },
     ui::SpatialViewState,
     view_kind::SpatialViewKind,
     visualizers::{
-        CamerasVisualizer, DepthImageVisualizer, EncodedDepthImageVisualizer,
-        SpatialViewVisualizerData,
+        CamerasVisualizer, CamerasVisualizerOutput, DepthImageVisualizer,
+        DepthImageVisualizerOutput, EncodedDepthImageVisualizer, EncodedDepthImageVisualizerOutput,
+        iter_spatial_data,
     },
-    PickableRectSourceData, PickableTexturedRect,
 };
 
 #[expect(clippy::too_many_arguments)]
 pub fn picking(
     ctx: &ViewerContext<'_>,
+    missing_chunk_reporter: &MissingChunkReporter,
     picking_context: &PickingContext,
     ui: &egui::Ui,
     mut response: egui::Response,
@@ -39,12 +44,12 @@ pub fn picking(
 
     // Upstream skips picking while dragging arbitrary UI widgets. That clashes with our custom
     // pointer handling in 3D views where drag input is expected.
-    if spatial_kind == SpatialViewKind::TwoD && ui.ctx().dragged_id().is_some() {
+    if spatial_kind == SpatialViewKind::TwoD && ui.dragged_id().is_some() {
         state.previous_picking_result = None;
         return Ok((response, None));
     }
 
-    let picking_rect_size = PickingContext::UI_INTERACTION_RADIUS * ui.ctx().pixels_per_point();
+    let picking_rect_size = PickingContext::UI_INTERACTION_RADIUS * ui.pixels_per_point();
     // Make the picking rect bigger than necessary so we can use it to counter-act delays.
     // (by the time the picking rectangle is read back, the cursor may have moved on).
     let picking_rect_size = (picking_rect_size * 2.0)
@@ -63,13 +68,13 @@ pub fn picking(
 
     let annotations = system_output
         .context_systems
-        .get::<AnnotationSceneContext>()?;
+        .get_and_report_missing::<AnnotationSceneContext>(missing_chunk_reporter)?;
 
     let picking_result = picking_context.pick(
         ctx.render_ctx(),
         query.view_id.gpu_readback_id(),
-        &state.previous_picking_result,
-        iter_pickable_rects(&system_output.view_systems),
+        state.previous_picking_result.as_ref(),
+        iter_pickable_rects(system_output),
         ui_rects,
     );
     state.previous_picking_result = Some(picking_result.clone());
@@ -107,17 +112,39 @@ pub fn picking(
         }
 
         response = if let Some(picked_pixel) = get_pixel_picking_info(system_output, hit) {
-            if let PickableRectSourceData::Image {
-                depth_meter: Some(meter),
-                image,
-            } = &picked_pixel.source_data
-            {
-                let [x, y] = picked_pixel.pixel_coordinates;
-                if let Some(raw_value) = image.get_xyc(x, y, 0) {
-                    let raw_value = raw_value.as_f64();
-                    let depth_in_meters = raw_value / *meter.0 as f64;
-                    depth_at_pointer = Some(depth_in_meters as f32);
+            match &picked_pixel.source_data {
+                PickableRectSourceData::Image {
+                    depth_meter: Some(meter),
+                    image,
+                } => {
+                    let [x, y] = picked_pixel.pixel_coordinates;
+                    if let Some(raw_value) = image.get_xyc(x, y, 0) {
+                        let raw_value = raw_value.as_f64();
+                        let depth_in_meters = raw_value / *meter.0 as f64;
+                        depth_at_pointer = Some(depth_in_meters as f32);
+                    }
                 }
+                PickableRectSourceData::Video {
+                    depth_meter: Some(meter),
+                } => {
+                    // For video-decoded depth images, read the depth value back from the GPU.
+                    let interaction_id = TextureInteractionId {
+                        entity_path: &instance_path.entity_path,
+                        interaction_idx: hit_idx as u32,
+                    };
+                    let [x, y] = picked_pixel.pixel_coordinates;
+                    if let Some(raw_value) = depth_value_from_gpu_texture(
+                        ctx.egui_ctx(),
+                        ctx.render_ctx(),
+                        &picked_pixel.texture.texture,
+                        &interaction_id,
+                        [x, y],
+                    ) {
+                        let depth_in_meters = raw_value / *meter.0 as f64;
+                        depth_at_pointer = Some(depth_in_meters as f32);
+                    }
+                }
+                _ => {}
             }
 
             response
@@ -126,7 +153,7 @@ pub fn picking(
                     ui.set_max_width(320.0);
                     ui.vertical(|ui| {
                         textured_rect_hover_ui(
-                            ctx,
+                            &ctx.active_recording_store_view_context(),
                             ui,
                             &instance_path,
                             query,
@@ -144,19 +171,27 @@ pub fn picking(
                 list_item_scope(ui, "spatial_hover", |ui| {
                     hit_ui(ui, hit);
                     item_ui::instance_path_button(
-                        ctx,
-                        &query.latest_at_query(),
-                        ctx.recording(),
+                        &ctx.active_recording_store_view_context(),
                         ui,
                         Some(query.view_id),
                         &instance_path,
                     );
-                    instance_path.data_ui_recording(ctx, ui, UiLayout::Tooltip);
+                    instance_path.data_ui(
+                        &ctx.active_recording_store_view_context(),
+                        ui,
+                        UiLayout::Tooltip,
+                    );
                 });
             })
         };
 
-        let item = Item::DataResult(query.view_id, instance_path.clone());
+        // TODO(andreas): GPU picking doesn't tell us which visualizer produced the result.
+        // We need to add the ability to look up the visualizer id when using GPU-based picking.
+        let item = Item::DataResult(DataResultInteractionAddress {
+            view_id: query.view_id,
+            instance_path: instance_path.clone(),
+            visualizer: None,
+        });
 
         if hit.hit_type == PickingHitType::TexturedRect {
             hovered_image_items.push(item);
@@ -201,15 +236,18 @@ pub fn picking(
             },
             SpatialViewKind::ThreeD => {
                 let hovered_point = picking_result.space_position();
-                let cameras_visualizer_output =
-                    system_output.view_systems.get::<CamerasVisualizer>()?;
+                let empty_cameras = Vec::new();
+                let pinhole_cameras = system_output
+                    .visualizer_data::<CamerasVisualizerOutput>(CamerasVisualizer::identifier())
+                    .ok()
+                    .map(|d| &d.pinhole_cameras)
+                    .unwrap_or(&empty_cameras);
 
                 ItemContext::ThreeD {
                     space_3d: query.space_origin.clone(),
                     pos: hovered_point,
                     tracked_entity: state.last_tracked_entity().cloned(),
-                    point_in_space_cameras: cameras_visualizer_output
-                        .pinhole_cameras
+                    point_in_space_cameras: pinhole_cameras
                         .iter()
                         .map(|cam| {
                             (
@@ -226,7 +264,7 @@ pub fn picking(
     if spatial_kind == SpatialViewKind::ThreeD {
         crate::pointer_events::emit_pointer_events(
             query.view_id,
-            query.space_origin,
+            &query.space_origin,
             &response,
             picking_context,
             picking_result.space_position(),
@@ -243,11 +281,9 @@ pub fn picking(
 }
 
 fn iter_pickable_rects(
-    visualizers: &VisualizerCollection,
+    system_output: &re_viewer_context::SystemExecutionOutput,
 ) -> impl Iterator<Item = &PickableTexturedRect> {
-    visualizers
-        .iter_visualizer_data::<SpatialViewVisualizerData>()
-        .flat_map(|data| data.pickable_rects.iter())
+    iter_spatial_data(system_output).flat_map(|(_affinity, data)| data.pickable_rects.iter())
 }
 
 /// If available, finds pixel info for a picking hit.
@@ -258,16 +294,16 @@ fn get_pixel_picking_info(
     hit: &crate::picking::PickingRayHit,
 ) -> Option<PickedPixelInfo> {
     let depth_visualizer_output = system_output
-        .view_systems
-        .get::<DepthImageVisualizer>()
+        .visualizer_data::<DepthImageVisualizerOutput>(DepthImageVisualizer::identifier())
         .ok();
     let encoded_depth_visualizer_output = system_output
-        .view_systems
-        .get::<EncodedDepthImageVisualizer>()
+        .visualizer_data::<EncodedDepthImageVisualizerOutput>(
+            EncodedDepthImageVisualizer::identifier(),
+        )
         .ok();
 
     if hit.hit_type == PickingHitType::TexturedRect {
-        iter_pickable_rects(&system_output.view_systems)
+        iter_pickable_rects(system_output)
             .find(|i| i.ent_path.hash() == hit.instance_path_hash.entity_path_hash)
             .and_then(|picked_rect| {
                 if matches!(picked_rect.source_data, PickableRectSourceData::Placeholder) {
@@ -302,15 +338,26 @@ fn get_pixel_picking_info(
                 .get(&hit.instance_path_hash.entity_path_hash)
         })
     {
+        let width = image_info
+            .as_ref()
+            .map(|i| i.width())
+            .unwrap_or_else(|| colormap.width_height()[0]);
         let pixel_coordinates = hit
             .instance_path_hash
             .instance
-            .to_2d_image_coordinate(image_info.width());
-        Some(PickedPixelInfo {
-            source_data: PickableRectSourceData::Image {
-                image: image_info.clone(),
+            .to_2d_image_coordinate(width);
+        let source_data = if let Some(image) = image_info {
+            PickableRectSourceData::Image {
+                image: image.clone(),
                 depth_meter: Some(*depth_meter),
-            },
+            }
+        } else {
+            PickableRectSourceData::Video {
+                depth_meter: Some(*depth_meter),
+            }
+        };
+        Some(PickedPixelInfo {
+            source_data,
             texture: colormap.clone(),
             pixel_coordinates,
         })

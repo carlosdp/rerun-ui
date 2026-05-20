@@ -40,6 +40,18 @@ pub fn register_fallbacks(system_registry: &mut re_viewer_context::ViewSystemReg
         opacity_fallback(ImageKind::Segmentation),
     );
 
+    // Line radii for solid primitives (thinner than the global default).
+    // This looks nicer with the default `FillMode::TransparentFillMajorWireframe`.
+    for component in [
+        archetypes::Boxes3D::descriptor_radii().component,
+        archetypes::Ellipsoids3D::descriptor_line_radii().component,
+        archetypes::Capsules3D::descriptor_line_radii().component,
+        archetypes::Cylinders3D::descriptor_line_radii().component,
+    ] {
+        system_registry
+            .register_fallback_provider(component, |_ctx| components::Radius::new_ui_points(0.5));
+    }
+
     // Pinhole
     system_registry.register_fallback_provider(
         archetypes::Pinhole::descriptor_image_plane_distance().component,
@@ -48,7 +60,11 @@ pub fn register_fallbacks(system_registry: &mut re_viewer_context::ViewSystemReg
                 return Default::default();
             };
 
-            let scene_size = state.bounding_boxes.smoothed.size().length();
+            let scene_size = state
+                .bounding_boxes
+                .region_of_interest_smoothed
+                .size()
+                .length();
 
             let d = if scene_size.is_finite() && scene_size > 0.0 {
                 // Works pretty well for `examples/python/open_photogrammetry_format/open_photogrammetry_format.py --no-frames`
@@ -88,7 +104,7 @@ pub fn register_fallbacks(system_registry: &mut re_viewer_context::ViewSystemReg
                         let results = data_result
                             .latest_at_with_blueprint_resolved_data::<archetypes::Pinhole>(
                                 ctx.view_ctx,
-                                ctx.query,
+                                &ctx.query,
                                 Some(camera_visualizer_instruction),
                             );
 
@@ -108,7 +124,11 @@ pub fn register_fallbacks(system_registry: &mut re_viewer_context::ViewSystemReg
 
             // If there is a finite bounding box, use the scene size to determine the axis length.
             if let Ok(state) = ctx.view_state().downcast_ref::<SpatialViewState>() {
-                let scene_size = state.bounding_boxes.smoothed.size().length();
+                let scene_size = state
+                    .bounding_boxes
+                    .region_of_interest_smoothed
+                    .size()
+                    .length();
 
                 if scene_size.is_finite() && scene_size > 0.0 {
                     return (scene_size * 0.05).into();
@@ -136,6 +156,7 @@ pub fn register_fallbacks(system_registry: &mut re_viewer_context::ViewSystemReg
     system_registry.register_fallback_provider(
         blueprint::archetypes::SpatialInformation::descriptor_target_frame().component,
         |ctx| {
+            re_tracing::profile_scope!("SpatialInformation fallback");
             // 1. Check if the space root has a defined coordinate frame.
             // 2. Check if all coordinate frames logged on entities included in the filter share the same
             //    root frame, if so use that frame.
@@ -168,16 +189,16 @@ pub fn register_fallbacks(system_registry: &mut re_viewer_context::ViewSystemReg
             }
 
             'scope: {
+                // This path only works if `TransformTreeContext` already built the transform forest.
+                // Creating `TransformDatabaseStoreCache` here would initialize the frame id registry,
+                // but still wouldn't build a useful transform forest, so a non-creating read is enough.
                 let caches = ctx.store_ctx().caches;
-                let (transforms, transform_forest) =
-                    caches.entry(|c: &mut re_viewer_context::TransformDatabaseStoreCache| {
-                        (
-                            c.read_lock_transform_cache(ctx.recording()),
-                            c.get_transform_forest(),
-                        )
-                    });
-
-                let Some(transform_forest) = transform_forest else {
+                let Some((frame_id_registry, transform_forest)) = caches
+                    .memoizer_read::<re_viewer_context::TransformDatabaseStoreCache, _>(|c| {
+                        Some((c.cached_frame_id_registry()?, c.transform_forest()?))
+                    })
+                    .flatten()
+                else {
                     break 'scope;
                 };
 
@@ -191,6 +212,8 @@ pub fn register_fallbacks(system_registry: &mut re_viewer_context::ViewSystemReg
                     if node.data_result.tree_prefix_only {
                         return true;
                     }
+
+                    re_tracing::profile_scope!("visit-node");
 
                     let Some(root_from_frame) = node
                         .data_result
@@ -236,7 +259,7 @@ pub fn register_fallbacks(system_registry: &mut re_viewer_context::ViewSystemReg
                 // Pick the first (alphabetical order) non-entity path root if
                 // we can find one.
                 if let Some(frame) = found_root
-                    && let Some(frame) = transforms.frame_id_registry().lookup_frame_id(frame)
+                    && let Some(frame) = frame_id_registry.lookup_frame_id(frame)
                 {
                     return frame.clone();
                 }

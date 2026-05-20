@@ -5,7 +5,6 @@ use re_log_types::EntityPath;
 use re_sdk_types::blueprint::archetypes::EyeControls3D;
 use re_sdk_types::blueprint::components::{AngularSpeed, Eye3DKind};
 use re_sdk_types::components::{LinearSpeed, Position3D, Vector3D};
-use re_ui::ContextExt as _;
 use re_view::controls::{
     DRAG_PAN3D_BUTTON, ROLL_MOUSE, ROLL_MOUSE_ALT, ROLL_MOUSE_MODIFIER, ROTATE3D_BUTTON,
     RuntimeModifiers, SPEED_UP_3D_MODIFIER,
@@ -29,8 +28,22 @@ pub struct Eye {
     pub fov_y: Option<f32>,
 }
 
+impl re_byte_size::SizeBytes for Eye {
+    #[inline]
+    fn heap_size_bytes(&self) -> u64 {
+        0
+    }
+
+    #[inline]
+    fn is_pod() -> bool {
+        true
+    }
+}
+
 impl Eye {
     pub const DEFAULT_FOV_Y: f32 = 55.0_f32 * std::f32::consts::TAU / 360.0;
+
+    pub const PERSPECTIVE_NEAR_PLANE: f32 = 0.01;
 
     pub fn from_camera(camera: &PinholeWrapper) -> Option<Self> {
         let fov_y = camera.pinhole.fov_y();
@@ -43,7 +56,7 @@ impl Eye {
 
     pub fn near(&self) -> f32 {
         if self.is_perspective() {
-            0.01 // TODO(emilk)
+            Self::PERSPECTIVE_NEAR_PLANE // TODO(emilk)
         } else {
             -1000.0 // TODO(andreas)
         }
@@ -157,6 +170,13 @@ struct EyeInterpolation {
     start: Eye,
 }
 
+impl re_byte_size::SizeBytes for EyeInterpolation {
+    #[inline]
+    fn heap_size_bytes(&self) -> u64 {
+        0
+    }
+}
+
 impl EyeInterpolation {
     pub fn target_time(start: &Eye, stop: &Eye) -> Option<f32> {
         // Take more time if the rotation is big:
@@ -211,9 +231,30 @@ pub struct EyeState {
     pub last_eye_up: Option<Vec3>,
 }
 
+impl re_byte_size::SizeBytes for EyeState {
+    fn heap_size_bytes(&self) -> u64 {
+        let Self {
+            fov_y: _,
+            velocity: _,
+            last_tracked_entity,
+            interpolation,
+            spin: _,
+            last_eye,
+            last_interaction_time: _,
+            last_look_target: _,
+            last_orbit_radius: _,
+            last_eye_up: _,
+        } = self;
+
+        last_tracked_entity.heap_size_bytes()
+            + interpolation.heap_size_bytes()
+            + last_eye.heap_size_bytes()
+    }
+}
+
 /// Utility struct for handling eye control parameter changes,
 /// e.g. via user input or blueprint.
-struct EyeController {
+pub(crate) struct EyeController {
     pos: Vec3,
     look_target: Vec3,
     kind: Eye3DKind,
@@ -228,11 +269,31 @@ impl EyeController {
     /// Avoids zentith/nadir singularity.
     const MAX_PITCH: f32 = 0.99 * 0.25 * std::f32::consts::TAU;
 
+    /// Avoids breaking the view by zooming in too far.
+    pub const MIN_ORBIT_DISTANCE: f32 = Eye::PERSPECTIVE_NEAR_PLANE * 2.0;
+
+    /// Cap on the orbital camera radius, as a multiple of the scene bounding box diagonal.
+    ///
+    /// Only applied when scroll-to-zoom wants to grow the radius further. Zoom-in, rotate,
+    /// pan, WASD, and every other form of motion are left alone — this is intentionally a
+    /// local restriction on orbital zoom-out only, not a general movement envelope. The 2D
+    /// view has its own, separate zoom-out cap (see `ui_2d::MAX_ZOOM_OUT_FACTOR`).
+    ///
+    /// If the radius already exceeds this (e.g. right after loading) the current radius is
+    /// used as the cap instead, so the camera isn't pulled back in.
+    const MAX_ORBITAL_ZOOM_OUT_FACTOR: f32 = 5.0;
+
     fn get_eye(&self) -> Eye {
         Eye {
             world_from_rub_view: IsoTransform::look_at_rh(
                 self.pos,
-                if self.pos.distance_squared(self.look_target) < 1e-6 {
+                // Check that the positions we base look target on are far enough
+                // apart here because if the eye is this zoomed in, look target
+                // likely is a value that can drastically change from small inputs
+                // because of float precision.
+                if self.pos.distance_squared(self.look_target)
+                    < (Self::MIN_ORBIT_DISTANCE * 0.5).powi(2)
+                {
                     self.pos + Vec3::Y
                 } else {
                     self.look_target
@@ -472,7 +533,7 @@ impl EyeController {
     }
 
     /// Handle zoom/scroll input.
-    fn handle_zoom(&mut self, egui_ctx: &egui::Context) {
+    fn handle_zoom(&mut self, egui_ctx: &egui::Context, scene_bounding_box: &macaw::BoundingBox) {
         let zoom_factor = egui_ctx.input(|input| {
             // egui's default horizontal_scroll_modifier is shift, which is also our speed-up modifier.
             // This means that a user who wants to speed up scroll-to-zoom will generate a horizontal scroll delta.
@@ -488,16 +549,18 @@ impl EyeController {
         match self.kind {
             Eye3DKind::Orbital => {
                 let radius = self.pos.distance(self.look_target);
-                let new_radius = radius / zoom_factor;
+
+                // Cap zoom-out against the scene bounding box. If we're already past the cap
+                // (e.g. right after loading) use the current radius instead — no snap-back.
+                let max_radius = max_orbital_radius(scene_bounding_box).max(radius);
+                let new_radius = (radius / zoom_factor).clamp(Self::MIN_ORBIT_DISTANCE, max_radius);
 
                 // The user may be scrolling to move the camera closer, but are not realizing
                 // the radius is now tiny.
                 // TODO(emilk): inform the users somehow that scrolling won't help, and that they should use WSAD instead.
                 // It might be tempting to start moving the camera here on scroll, but that would is bad for other reasons.
 
-                // Don't let radius go too small or too big because this might cause infinity/nan in some calculations.
-                // Max value is chosen with some generous margin of an observed crash due to infinity.
-                if f32::MIN_POSITIVE < new_radius && new_radius < 1.0e17 {
+                if f32::MIN_POSITIVE < new_radius {
                     self.pos = self.look_target - self.fwd() * new_radius;
                     self.did_interact = true;
                 }
@@ -564,6 +627,7 @@ impl EyeController {
         eye_state: &mut EyeState,
         response: &egui::Response,
         drag_threshold: f32,
+        scene_bounding_box: &macaw::BoundingBox,
     ) {
         let capture_pointer = crate::pointer_events::should_capture_interactions(response);
 
@@ -586,7 +650,7 @@ impl EyeController {
             self.handle_drag(response, drag_threshold);
 
             if response.hovered() {
-                self.handle_zoom(&response.ctx);
+                self.handle_zoom(&response.ctx, scene_bounding_box);
             }
         }
 
@@ -600,6 +664,25 @@ impl EyeController {
             eye_state.last_interaction_time = Some(response.ctx.time());
         }
     }
+}
+
+/// Cap on the orbital zoom-out radius, derived from the scene bounding box diagonal.
+///
+/// Returns `1.0e17` (a large fallback that avoids infinities downstream) when no usable scene
+/// bounding box is available.
+fn max_orbital_radius(scene_bounding_box: &macaw::BoundingBox) -> f32 {
+    // `1.0e17` fallback is chosen with generous margin of an observed crash due to infinity.
+    let fallback = 1.0e17;
+
+    if !scene_bounding_box.is_finite() || scene_bounding_box.is_nothing() {
+        return fallback;
+    }
+    let scene_diagonal = scene_bounding_box.size().length();
+    if !scene_diagonal.is_finite() || scene_diagonal <= 0.0 {
+        return fallback;
+    }
+    (scene_diagonal * EyeController::MAX_ORBITAL_ZOOM_OUT_FACTOR)
+        .max(EyeController::MIN_ORBIT_DISTANCE)
 }
 
 pub fn find_camera(cameras: &[PinholeWrapper], needle: &EntityPath) -> Option<Eye> {
@@ -684,7 +767,7 @@ impl EyeState {
 
         // We do input before tracking entity, because the input can cause the eye
         // to stop tracking.
-        eye_controller.handle_input(self, response, drag_threshold);
+        eye_controller.handle_input(self, response, drag_threshold, &bounding_boxes.current);
 
         // If we interacted we write to the blueprint so reset spin offset.
         if eye_controller.did_interact {
@@ -787,14 +870,20 @@ impl EyeState {
                 //     ..
                 // }) = ctx.selection_state().hovered_space_context()
 
-                if let Some(entity_bbox) = bounding_boxes.per_entity.get(&tracking_entity.hash()) {
+                if let Some(entity_bbox) = bounding_boxes
+                    .region_of_interest_per_entity
+                    .get(&tracking_entity.hash())
+                {
                     // If we're tracking something new, set the current position & look target to the correct view.
                     if new_tracking {
                         let fwd = eye_controller.fwd();
                         let radius = entity_bbox.centered_bounding_sphere_radius() * 1.5;
                         let radius = if radius < 0.0001 {
                             // Handle zero-sized bounding boxes:
-                            (bounding_boxes.current.centered_bounding_sphere_radius() * 1.5)
+                            (bounding_boxes
+                                .region_of_interest_current
+                                .centered_bounding_sphere_radius()
+                                * 1.5)
                                 .at_least(0.02)
                         } else {
                             radius
@@ -929,7 +1018,10 @@ impl EyeState {
         // Focusing cameras is not something that happens now, since those are always tracked.
         if let Some(target_eye) = find_camera(cameras, focused_entity) {
             eye_controller.copy_from_eye(&target_eye);
-        } else if let Some(entity_bbox) = bounding_boxes.per_entity.get(&focused_entity.hash()) {
+        } else if let Some(entity_bbox) = bounding_boxes
+            .region_of_interest_per_entity
+            .get(&focused_entity.hash())
+        {
             let fwd = self
                 .last_eye
                 .map(|eye| eye.forward_in_world())
@@ -937,7 +1029,11 @@ impl EyeState {
             let radius = entity_bbox.centered_bounding_sphere_radius() * 1.5;
             let radius = if radius < 0.0001 {
                 // Handle zero-sized bounding boxes:
-                (bounding_boxes.current.centered_bounding_sphere_radius() * 1.5).at_least(0.02)
+                (bounding_boxes
+                    .region_of_interest_current
+                    .centered_bounding_sphere_radius()
+                    * 1.5)
+                    .at_least(0.02)
             } else {
                 radius
             };
@@ -956,6 +1052,64 @@ impl EyeState {
         eye_property
             .clear_blueprint_component(ctx.viewer_ctx, EyeControls3D::descriptor_tracking_entity());
 
+        Ok(())
+    }
+
+    pub fn focus_point(
+        &self,
+        ctx: &ViewContext<'_>,
+        bounding_boxes: &SceneBoundingBoxes,
+        eye_property: &ViewProperty,
+        focused_entity: &EntityPath,
+        point_in_space: Vec3,
+    ) -> Result<(), ViewPropertyQueryError> {
+        let mut eye_controller = EyeController::from_blueprint(ctx, eye_property, self.fov_y)?;
+        eye_controller.did_interact = true;
+
+        let EyeController {
+            pos: old_pos,
+            look_target: old_look_target,
+            eye_up: old_eye_up,
+            ..
+        } = eye_controller;
+
+        let fwd = self
+            .last_eye
+            .map(|eye| eye.forward_in_world())
+            .unwrap_or_else(|| Vec3::splat(f32::sqrt(1.0 / 3.0)));
+
+        // Compute the distance from the current camera to the target point
+        let current_eye_pos = self
+            .last_eye
+            .map(|eye| eye.pos_in_world())
+            .unwrap_or(old_pos);
+        let distance_to_target = current_eye_pos.distance(point_in_space);
+
+        // Compute a radius from the target entity's bounding sphere
+        let bbox_radius = bounding_boxes
+            .per_entity
+            .get(&focused_entity.hash())
+            .map(|bbox| bbox.centered_bounding_sphere_radius() * 1.5)
+            .filter(|radius| *radius >= 0.0001);
+
+        // Use the minimum of both to avoid large jumps of the camera when clicking a nearby point
+        let radius = bbox_radius
+            .map(|bbox_radius| bbox_radius.min(distance_to_target))
+            .unwrap_or(distance_to_target)
+            .at_least(0.02);
+
+        eye_controller.look_target = point_in_space;
+        eye_controller.pos = point_in_space - fwd * radius;
+
+        eye_controller.save_to_blueprint(
+            ctx.viewer_ctx,
+            eye_property,
+            old_pos,
+            old_look_target,
+            old_eye_up,
+        );
+        eye_property
+            .clear_blueprint_component(ctx.viewer_ctx, EyeControls3D::descriptor_tracking_entity());
         Ok(())
     }
 

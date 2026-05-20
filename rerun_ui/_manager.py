@@ -34,7 +34,7 @@ def _native_protocol_version() -> int:
 
 def _native_expected_rerun_major_minor() -> str:
     if _native is None:
-        return "0.29"
+        return "0.32"
     return str(_native.expected_rerun_major_minor())
 
 

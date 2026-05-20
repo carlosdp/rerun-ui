@@ -77,7 +77,7 @@ pub enum AnyMesh<'a> {
 impl MeshCache {
     pub fn entry(
         &mut self,
-        name: &str,
+        name: &dyn std::fmt::Display,
         key: MeshCacheKey,
         mesh: AnyMesh<'_>,
         render_ctx: &RenderContext,
@@ -88,9 +88,11 @@ impl MeshCache {
             .or_default()
             .entry(key)
             .or_insert_with(|| {
+                re_tracing::profile_scope!("MeshCache-miss");
+                let name = name.to_string();
                 re_log::trace!("Loading CPU mesh {name:?}…");
 
-                let result = LoadedMesh::load(name.to_owned(), mesh, render_ctx);
+                let result = LoadedMesh::load(name.clone(), mesh, render_ctx);
 
                 match result {
                     Ok(cpu_mesh) => MeshEntry {
@@ -131,7 +133,7 @@ impl Cache for MeshCache {
     }
 
     fn purge_memory(&mut self) {
-        self.cache.clear();
+        // We already purge everything that isn't being actively used
     }
 
     fn vram_usage(&self) -> re_byte_size::MemUsageTree {
