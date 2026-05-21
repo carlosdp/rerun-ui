@@ -55,6 +55,7 @@ pub fn run_viewer_process(grpc_port: u16, control_port: u16) -> anyhow::Result<(
         native_options,
         Box::new(move |cc| {
             re_viewer::customize_eframe_and_setup_renderer(cc)?;
+            default_to_dark_theme(&cc.egui_ctx);
 
             let mut rerun_app = re_viewer::App::new(
                 main_thread_token,
@@ -72,6 +73,14 @@ pub fn run_viewer_process(grpc_port: u16, control_port: u16) -> anyhow::Result<(
     )?;
 
     Ok(())
+}
+
+fn default_to_dark_theme(ctx: &egui::Context) {
+    ctx.options_mut(|options| {
+        if options.theme_preference == egui::ThemePreference::System {
+            options.theme_preference = egui::ThemePreference::Dark;
+        }
+    });
 }
 
 struct CustomViewerApp {
